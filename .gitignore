@@ -1,0 +1,12 @@
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*service_role*
+*sb_secret_*
+*database-password*
+node_modules/
+playwright-report/
+test-results/
