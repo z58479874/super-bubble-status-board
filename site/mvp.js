@@ -1,3 +1,4 @@
+import { createActions } from "./mvp-actions.js";
 
 const config = window.__SB_CONFIG__ || {};
 const sessionKey = "super_bubble_012_session";
@@ -45,6 +46,7 @@ let busy = false;
 let cache = {};
 let updatedAt = {};
 let pageError = {};
+let actions;
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, character => ({
@@ -153,6 +155,7 @@ function showError(id, message) {
   element.hidden = !message;
 }
 function showLogin(message = "") {
+  actions?.dismiss();
   clearSession(); showView("login");
   document.getElementById("pin").value = "";
   showError("loginError", message);
@@ -207,8 +210,8 @@ function selectPage(next) {
   window.scrollTo(0, 0);
 }
 async function refresh(force) {
-  if (!session || views.dashboard.hidden || document.hidden) return;
-  if (busy && !force) return;
+  if (!session || views.dashboard.hidden || document.hidden) return false;
+  if (busy && !force) return false;
   if (controller) controller.abort();
   controller = new AbortController();
   const myEpoch = ++epoch;
@@ -224,11 +227,13 @@ async function refresh(force) {
     updatedAt[myPage] = new Date().toISOString();
     pageError[myPage] = "";
     render();
+    return true;
   } catch (error) {
     if (myEpoch !== epoch || myPage !== page) return;
     if (isSessionError(error)) { showLogin("登录已失效，请重新输入个人 PIN。"); return; }
     pageError[myPage] = readableError(error);
     render();
+    return false;
   } finally {
     if (myEpoch === epoch) { busy = false; controller = null; }
   }
@@ -361,7 +366,22 @@ function render() {
   }
   content.innerHTML = ({ home: renderHome, staff: renderStaff, positions: renderPositions,
     handoffs: renderHandoffs, my: renderMy })[page](data) + `<p class="muted" style="font-size:11px;text-align:center;margin:10px 0 25px">最后更新 ${safe(refreshedAt(updatedAt[page]))} · 每 5 秒自动读取</p>`;
+  actions?.decorate(page, data, content);
 }
+
+actions = createActions({
+  rpc: (name, body) => rpc(name, body),
+  getSession: () => session,
+  getPage: () => page,
+  refreshAfterWrite: async () => {
+    for (const name of Object.keys(cache)) if (name !== page) delete cache[name];
+    if (!await refresh(true)) throw new Error("写入后的现场数据尚未读取成功");
+  },
+  saveSession,
+  areaNames,
+  escapeHtml,
+  datetime
+});
 
 document.getElementById("loginForm").addEventListener("submit", async event => {
   event.preventDefault();

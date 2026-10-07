@@ -1,0 +1,46 @@
+.lifecycle-card{background:#fff;border:1px solid #ece8e3;border-radius:14px;padding:14px 15px}
+.lifecycle-card p{margin:0 0 12px;color:#66717b;font-size:13px;line-height:1.5}
+.lifecycle-actions{display:flex;gap:8px;flex-wrap:wrap}
+.action-button{min-height:48px;border:1px solid #e7cbbd;border-radius:10px;background:#fffaf6;color:#b55d34;padding:9px 13px;font-size:14px;font-weight:800;touch-action:manipulation}
+.action-button.primary{background:#ec743d;border-color:#ec743d;color:#fff}
+.action-button:disabled{opacity:.55}
+.card-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid #f0eeeb}
+.card-actions .action-button{min-width:92px}
+.page-title>.action-button{flex:none}
+.sheet-open{overflow:hidden}
+.sheet-backdrop{position:fixed;z-index:40;inset:0;background:#1723307a;display:flex;align-items:flex-end;justify-content:center;padding:10px 10px 0}
+.sheet-panel{width:min(100%,520px);max-height:min(88vh,850px);overflow:auto;background:#fff;border-radius:20px 20px 0 0;padding:20px 18px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -12px 35px #15202c29}
+.sheet-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:15px}
+.sheet-head h2{font-size:20px;line-height:1.25;margin:0;color:#253540}
+.sheet-head p{font-size:13px;color:#687783;line-height:1.55;margin:7px 0 0}
+.sheet-close{flex:none;width:44px;height:44px;border:0;border-radius:9px;background:#f2f3f3;color:#697783;font-size:25px;line-height:1;touch-action:manipulation}
+.sheet-body{font-size:13px;color:#4c5e6b;line-height:1.55;overflow-wrap:anywhere}
+.sheet-hint{padding:10px 12px;border-radius:9px;background:#f5f7f8;color:#677784;font-size:12px;line-height:1.5}
+.sheet-field{display:block;font-size:12px;font-weight:800;color:#475866;margin:12px 0}
+.sheet-field input,.sheet-field select,.sheet-field textarea{display:block;width:100%;min-width:0;margin-top:7px;padding:10px 12px;border:1px solid #d7dfe3;border-radius:10px;background:#fff;color:#263744;font-size:15px;font-weight:500;outline:none}
+.sheet-field input,.sheet-field select{height:48px}
+.sheet-field textarea{min-height:80px;resize:vertical}
+.sheet-field input:focus,.sheet-field select:focus,.sheet-field textarea:focus{border-color:#e9814e;box-shadow:0 0 0 3px #f2763e20}
+.sheet-buttons{display:grid;gap:9px;margin-top:16px}
+.sheet-buttons button{width:100%;min-height:48px;border-radius:10px;padding:9px 12px;font-size:14px;font-weight:850}
+.sheet-buttons .primary-button{margin:0}
+.sheet-secondary{border:1px solid #dadfe2;background:#fff;color:#425360}
+.sheet-danger{border:1px solid #db6260;background:#c64f4b;color:#fff}
+.sheet-error{margin:12px 0 0;padding:10px 12px;border:1px solid #efb9b4;background:#fff0ee;color:#ad423e;border-radius:9px;font-size:12px;line-height:1.5}
+.sheet-check{display:flex;align-items:flex-start;gap:9px;padding:12px;border:1px solid #ead6c8;border-radius:10px;background:#fffaf6;color:#5f4c43;font-size:13px}
+.sheet-check input{width:19px;height:19px;flex:none;margin:0}
+.sheet-subsection{margin:18px 0 0;border-top:1px solid #eceeec;padding-top:12px}
+.sheet-subsection strong{font-size:13px;color:#3d4b57}
+.sheet-subsection p{margin:7px 0;color:#6e7a82;font-size:12px}
+.candidate-card{border:1px solid #e7e9ea;border-radius:10px;padding:10px;margin:8px 0}
+.break-timing{color:#a9602c!important;font-weight:800}
+.candidate-card strong,.candidate-card small{display:block}
+.candidate-card small{margin-top:4px;color:#849099}
+.result-card{border:1px solid #d5e8db;background:#f6fcf8;border-radius:13px;padding:16px}
+.result-card strong{font-size:22px;color:#29744e}
+.result-card p{margin:8px 0 0}
+.one-time-pin{margin:20px auto;text-align:center;padding:18px;border:2px dashed #e88a57;border-radius:14px;background:#fff6ef;color:#c56029;font-size:31px;font-weight:900;letter-spacing:.1em}
+.action-notice{position:fixed;z-index:60;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);width:min(calc(100% - 28px),480px);background:#315d47;color:#fff;padding:12px 15px;border-radius:11px;box-shadow:0 8px 25px #13291d33;font-size:13px;font-weight:800;line-height:1.5}
+.action-notice.error{background:#a94642}
+@media(min-width:700px){.sheet-backdrop{align-items:center;padding:20px}.sheet-panel{border-radius:18px;max-height:min(88vh,800px)}}
+@media(max-width:390px){.sheet-panel{padding-left:15px;padding-right:15px}.lifecycle-actions .action-button{flex:1 1 auto}.page-title>.action-button{padding-left:9px;padding-right:9px}}
