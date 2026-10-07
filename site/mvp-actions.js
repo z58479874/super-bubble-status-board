@@ -8,6 +8,9 @@ export function createActions(api) {
   let working = false;
   let tempDraft = null;
   let noticeTimer = null;
+  let directoryRows = null;
+  const roleNames = { manager: "店长", deputy: "副店长", supervisor: "主管", staff: "员工" };
+  const employmentNames = { full_time: "全职", regular_part_time: "固定兼职", temporary_part_time: "临时兼职" };
 
   const e = escapeHtml;
   const $ = (selector, root = sheet) => root?.querySelector(selector);
@@ -53,6 +56,7 @@ export function createActions(api) {
     working = false;
     if (sheet) { sheet.remove(); sheet = null; }
     tempDraft = null;
+    directoryRows = null;
     document.body.classList.remove("sheet-open");
   }
   function setSheetError(message) {
@@ -60,10 +64,10 @@ export function createActions(api) {
     if (box) { box.textContent = message; box.hidden = !message; }
     else notice(message, true);
   }
-  function renderSheet({ title, description = "", body = "", buttons = [], onOpen }) {
+  function renderSheet({ title, description = "", body = "", buttons = [], onOpen, fullScreen = false }) {
     if (sheet) { sheet.remove(); sheet = null; }
     sheet = document.createElement("div");
-    sheet.className = "sheet-backdrop";
+    sheet.className = `sheet-backdrop${fullScreen ? " directory-view" : ""}`;
     sheet.innerHTML = `<div class="sheet-panel" role="dialog" aria-modal="true" aria-label="${e(title)}"><div class="sheet-head"><div><h2>${e(title)}</h2>${description ? `<p>${e(description)}</p>` : ""}</div><button type="button" class="sheet-close" aria-label="关闭">×</button></div><div class="sheet-body">${body}</div><p class="sheet-error" role="alert" hidden></p><div class="sheet-buttons">${buttons.map((item, index) => `<button type="button" data-sheet-button="${index}" class="${item.primary ? "primary-button" : item.danger ? "sheet-danger" : "sheet-secondary"}">${e(item.label)}</button>`).join("")}</div></div>`;
     sheet.querySelector(".sheet-close").addEventListener("click", closeSheet);
     sheet.addEventListener("click", event => { if (event.target === sheet) closeSheet(); });
@@ -148,7 +152,8 @@ export function createActions(api) {
     currentData = data;
     if (data.rpc_today_positions) for (const item of data.rpc_today_positions) positionNames.set(item.position_id, item.name);
     if (isManager() && page === "home") decorateLifecycle(content);
-    if (isManager() && page === "staff") decorateStaff(content);
+    if (getSession()?.role === "manager" && page === "staff") decorateStaff(content);
+    else if (isManager() && page === "staff" && ["not_started", "monitoring"].includes(phase())) decorateStaff(content);
     if (isManager() && page === "positions") decoratePositions(content);
     if (isManager() && page === "handoffs") decorateHandoffs(content);
     if (page === "my") decorateMy(content);
@@ -195,13 +200,89 @@ export function createActions(api) {
   }
 
   function decorateStaff(content) {
-    if (!["not_started", "monitoring"].includes(phase())) return;
     const title = content.querySelector(".page-title");
-    title?.append(actionButton("今日排班", openRoster));
+    title?.classList.add("staff-page-title");
+    if (getSession()?.role === "manager") title?.append(actionButton("员工管理", openDirectory, true));
+    if (["not_started", "monitoring"].includes(phase())) title?.append(actionButton("今日排班", openRoster));
     for (const card of content.querySelectorAll("[data-staff-id]")) {
       const row = staffById(card.dataset.staffId);
-      if (row) appendAction(card, "操作", () => openStaffActions(row));
+      if (!row) continue;
+      const bar = document.createElement("div"); bar.className = "card-actions";
+      if (getSession()?.role === "manager") {
+        card.setAttribute("role", "button");
+        card.tabIndex = 0;
+        card.setAttribute("aria-label", `查看 ${row.name} 的员工详情`);
+        card.addEventListener("click", event => { if (!event.target.closest("button")) openStaffDetail(row.staff_id, "today", row); });
+        card.addEventListener("keydown", event => {
+          if (event.target !== card || !["Enter", " "].includes(event.key)) return;
+          event.preventDefault(); openStaffDetail(row.staff_id, "today", row);
+        });
+        bar.append(actionButton("查看资料", () => openStaffDetail(row.staff_id, "today", row)));
+      }
+      if (["not_started", "monitoring"].includes(phase())) bar.append(actionButton("今日现场操作", () => openStaffActions(row)));
+      if (bar.childElementCount) card.append(bar);
     }
+  }
+  async function loadDirectory() {
+    if (directoryRows) return directoryRows;
+    const rows = await rpc("rpc_staff_directory", { p_session_token: token() });
+    if (!Array.isArray(rows)) throw new Error("员工名册返回格式不正确");
+    directoryRows = rows;
+    return rows;
+  }
+  async function openDirectory() {
+    if (getSession()?.role !== "manager") return;
+    renderSheet({ title: "员工管理", description: "正在读取长期员工名册…", fullScreen: true });
+    const loadingSheet = sheet;
+    try {
+      const rows = await loadDirectory();
+      if (sheet !== loadingSheet) return;
+      renderSheet({ title: "员工管理", description: `全部员工 ${rows.length} 人 · 与今日排班和营业状态无关`, fullScreen: true,
+        body: `<label class="sheet-field">搜索姓名或员工编号<input name="staffSearch" type="search" autocomplete="off" placeholder="输入姓名或员工编号"></label><div class="directory-list" data-directory-list></div>`,
+        buttons: [{ label: "关闭员工管理", action: closeSheet }],
+        onOpen: () => {
+          const search = $("[name=staffSearch]");
+          const list = $("[data-directory-list]");
+          const update = () => {
+            const query = search.value.trim().toLocaleLowerCase();
+            const shown = rows.filter(row => `${row.name} ${row.id}`.toLocaleLowerCase().includes(query));
+            list.innerHTML = shown.length ? shown.map(row => `<button type="button" class="directory-entry" data-directory-id="${e(row.id)}"><span><strong>${e(row.name)}</strong><small>${e(row.id)} · ${e(row.department)} · ${e(roleNames[row.role] || row.role)} · ${e(employmentNames[row.employment_type] || row.employment_type)}</small></span><span class="pill ${row.active ? "green" : "gray"}">${row.active ? "启用" : "停用"}</span></button>`).join("") : `<p class="sheet-hint">没有匹配的员工。</p>`;
+          };
+          search.addEventListener("input", update);
+          list.addEventListener("click", event => {
+            const button = event.target.closest("[data-directory-id]");
+            if (button) openStaffDetail(button.dataset.directoryId, "directory");
+          });
+          update();
+        } });
+    } catch (error) {
+      if (sheet !== loadingSheet) return;
+      renderSheet({ title: "员工管理", description: "员工名册暂时无法读取。", fullScreen: true,
+        body: `<p class="sheet-hint">${e(explain(error))}</p>`,
+        buttons: [{ label: "重试", primary: true, action: () => { directoryRows = null; openDirectory(); } }, { label: "关闭", action: closeSheet }] });
+    }
+  }
+  async function openStaffDetail(staffId, source = "today", fallback = null) {
+    if (getSession()?.role !== "manager") return;
+    renderSheet({ title: "员工详情", description: "正在核对长期员工档案…" });
+    const loadingSheet = sheet;
+    let row;
+    try { row = (await loadDirectory()).find(item => item.id === staffId); }
+    catch (error) { if (sheet === loadingSheet) setSheetError(explain(error)); return; }
+    if (sheet !== loadingSheet) return;
+    if (!row) row = fallback && { ...fallback, id: fallback.staff_id };
+    if (!row) { setSheetError("员工档案未找到，请重新打开名册。 "); return; }
+    const today = staffById(staffId);
+    const detail = `<dl class="staff-detail-grid"><div><dt>姓名</dt><dd>${e(row.name)}</dd></div><div><dt>员工编号</dt><dd>${e(row.id)}</dd></div><div><dt>部门</dt><dd>${e(row.department)}</dd></div><div><dt>角色</dt><dd>${e(roleNames[row.role] || row.role)}</dd></div><div><dt>用工类型</dt><dd>${e(employmentNames[row.employment_type] || row.employment_type)}</dd></div><div><dt>是否启用</dt><dd>${row.active ? "启用" : "停用"}</dd></div></dl><div class="sheet-subsection"><strong>可安排岗位</strong><p>数量和明细：当前员工名册接口未提供，不能根据今日排班推算。</p></div>${today ? `<div class="sheet-subsection"><strong>今日现场（仅供查看）</strong><p>${e(today.status_display || today.status || "状态待初始化")} · ${e(today.roster_status === "cancelled" ? "排班已取消" : "今日已排班")}</p></div>` : ""}${!row.active ? `<p class="sheet-hint">该员工已停用，现有 PIN 接口会拒绝签发。</p>` : row.id === getSession()?.staff_id ? `<p class="sheet-hint">本人 PIN 请在“我的”页面修改；管理重置接口不允许重置自己的 PIN。</p>` : ""}`;
+    renderSheet({ title: `${row.name} · 员工详情`, description: "人员资料操作与今日现场操作分开", body: detail,
+      buttons: [
+        { label: "初始化/重置PIN", primary: true, action: () => {
+          if (!row.active) { setSheetError("该员工已停用，现有 PIN 接口不允许签发。 "); return; }
+          if (row.id === getSession()?.staff_id) { setSheetError("请到“我的”页面修改自己的 PIN。 "); return; }
+          openResetPin(row);
+        } },
+        { label: source === "directory" ? "返回员工名册" : "关闭详情", action: source === "directory" ? openDirectory : closeSheet }
+      ] });
   }
   function openStaffActions(row) {
     const p = phase();
@@ -232,7 +313,6 @@ export function createActions(api) {
     }
     if (p === "monitoring" && ["meal", "short_leave"].includes(row.status)) actions.push({ label: "返岗", action: () => returnFromBreak(row) });
     if (p === "monitoring" && row.status && row.status !== "not_arrived" && row.status !== "off_duty") actions.push({ label: "异常真实离岗", action: () => openEmergency(row), danger: true });
-    if (getSession()?.role === "manager" && row.staff_id !== getSession().staff_id && row.active) actions.push({ label: "初始化 / 重置 PIN", action: () => openResetPin(row) });
     renderSheet({ title: `${row.name} · 现场操作`, description: `${row.staff_id} · ${row.status_display || row.status || "已排班"}`, buttons: [...actions, { label: "关闭", action: closeSheet }] });
   }
 
@@ -450,8 +530,9 @@ export function createActions(api) {
     ] });
   }
   function openResetPin(row) {
-    confirm("初始化 / 重置 PIN", `将为 ${row.name}（${row.staff_id}）签发一次性临时 PIN，旧 PIN 和旧会话立即失效。请当面告知员工。`, "签发临时 PIN", async () => {
-      const outcome = await callWrite("pin_manager_issue_temp", { p_target_staff_id: row.staff_id }, null, { keepSheet: true });
+    const staffId = row.id || row.staff_id;
+    confirm("初始化 / 重置 PIN", `将为 ${row.name}（${staffId}）签发一次性临时 PIN，旧 PIN 和旧会话立即失效。请当面告知员工。`, "签发临时 PIN", async () => {
+      const outcome = await callWrite("pin_manager_issue_temp", { p_target_staff_id: staffId }, null, { keepSheet: true });
       if (!outcome.ok) return;
       const temporaryPin = outcome.result?.temporary_pin;
       renderSheet({ title: "临时 PIN · 仅显示一次", description: `请当面告知 ${row.name}，员工登录后需要修改。关闭后本页面不再保存或显示。`, body: `<div class="one-time-pin">${e(temporaryPin || "签发失败，请核对")}</div>`, buttons: [{ label: "我已当面告知，关闭", primary: true, action: closeSheet }] });

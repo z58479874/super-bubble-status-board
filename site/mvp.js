@@ -362,6 +362,7 @@ function render() {
   if (error) banner.textContent = `${cache[page] ? "连接中断，以下为上次成功读取的数据。" : "暂时无法读取现场数据。"} ${error} · ${updatedAt[page] ? `最后更新于 ${refreshedAt(updatedAt[page])}` : "请检查网络并重试"}`;
   if (!data) {
     content.innerHTML = title({ home: "今日现场", staff: "今日人员", positions: "岗位状态", handoffs: "交接待办", my: "我的今日状态" }[page], "只读现场数据") + empty(error ? "读取失败" : "正在读取现场数据", error || "请稍候…");
+    if (page === "staff") actions?.decorate(page, {}, content);
     return;
   }
   content.innerHTML = ({ home: renderHome, staff: renderStaff, positions: renderPositions,
