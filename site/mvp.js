@@ -113,7 +113,7 @@ function readableError(error, context = "read") {
   if (context === "pin") return "PIN 修改暂时失败，请稍后重试。";
   return "现场数据暂时无法读取，请稍后刷新。";
 }
-async function rpc(name, body, signal) {
+async function rpc(name, body, signal, allowEmptyResponse = false) {
   const ownController = signal ? null : new AbortController();
   const timeout = setTimeout(() => (ownController || controller)?.abort(), 12000);
   try {
@@ -121,11 +121,27 @@ async function rpc(name, body, signal) {
       method: "POST", headers: { apikey: config.publishableKey, "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body), signal: signal || ownController.signal, cache: "no-store"
     });
-    let data;
-    try { data = await response.json(); } catch { throw new Error("服务器返回了无法读取的数据"); }
+    const raw = await response.text();
+    let data = null;
+    if (raw.trim()) {
+      try { data = JSON.parse(raw); }
+      catch {
+        if (!response.ok) data = null;
+        else if (allowEmptyResponse) data = raw;
+        else throw new Error("服务器返回了无法读取的数据");
+      }
+    } else if (response.ok && !allowEmptyResponse) {
+      throw new Error("服务器返回了无法读取的数据");
+    }
     if (!response.ok) {
       const error = new Error(data?.message || data?.error || `请求失败（${response.status}）`);
       error.code = data?.code;
+      if (isSessionError(error)) showLogin("登录已过期，请重新验证。 ");
+      throw error;
+    }
+    if (allowEmptyResponse && data && typeof data === "object" && !Array.isArray(data) && data.error) {
+      const error = new Error(data.message || String(data.error));
+      error.code = data.code;
       if (isSessionError(error)) showLogin("登录已过期，请重新验证。 ");
       throw error;
     }
@@ -135,6 +151,7 @@ async function rpc(name, body, signal) {
     throw error;
   } finally { clearTimeout(timeout); }
 }
+const writeRpc = (name, body) => rpc(name, body, undefined, true);
 function saveSession(value) {
   session = { session_token: value.session_token, staff_id: value.staff_id, name: value.name,
     role: value.role, expires_at: value.expires_at, must_change_pin: Boolean(value.must_change_pin) };
@@ -372,6 +389,7 @@ function render() {
 
 actions = createActions({
   rpc: (name, body) => rpc(name, body),
+  writeRpc,
   getSession: () => session,
   getPage: () => page,
   refreshAfterWrite: async () => {
@@ -379,6 +397,7 @@ actions = createActions({
     if (!await refresh(true)) throw new Error("写入后的现场数据尚未读取成功");
   },
   saveSession,
+  requireLogin: showLogin,
   areaNames,
   escapeHtml,
   datetime
@@ -393,7 +412,7 @@ document.getElementById("loginForm").addEventListener("submit", async event => {
   button.disabled = true; button.textContent = "正在验证…";
   showError("loginError", "");
   try {
-    const result = await rpc("pin_login", { p_identifier: identifier, p_pin: pin });
+    const result = await writeRpc("pin_login", { p_identifier: identifier, p_pin: pin });
     if (!result?.ok) { showError("loginError", result?.message || "登录失败，请检查输入。"); return; }
     saveSession(result);
     document.getElementById("pin").value = "";
@@ -412,7 +431,8 @@ document.getElementById("changePinForm").addEventListener("submit", async event 
   button.disabled = true; button.textContent = "正在保存…";
   showError("changePinError", "");
   try {
-    const result = await rpc("pin_change", { p_session_token: session.session_token, p_current_pin: current, p_new_pin: fresh });
+    const result = await writeRpc("pin_change", { p_session_token: session.session_token, p_current_pin: current, p_new_pin: fresh });
+    if (result === null || result === "") { showLogin("PIN 修改已提交，但未返回新会话。请用新 PIN 重新登录。 "); return; }
     if (!result?.ok) { showError("changePinError", result?.message || "修改失败。"); return; }
     saveSession({ ...session, ...result, must_change_pin: false });
     event.target.reset();
@@ -425,7 +445,7 @@ document.getElementById("changePinForm").addEventListener("submit", async event 
 document.getElementById("logoutButton").addEventListener("click", async () => {
   const token = session?.session_token;
   showLogin("已退出。");
-  if (token) { try { await rpc("pin_logout", { p_session_token: token }); } catch { /* local token already removed */ } }
+  if (token) { try { await writeRpc("pin_logout", { p_session_token: token }); } catch { /* local token already removed */ } }
 });
 document.getElementById("bottomNav").addEventListener("click", event => {
   const button = event.target.closest("[data-page]");

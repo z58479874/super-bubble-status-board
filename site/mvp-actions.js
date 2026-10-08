@@ -1,6 +1,6 @@
 // 013: 手机写操作仅使用既有 public RPC；规则和权限仍由数据库决定。
 export function createActions(api) {
-  const { rpc, getSession, getPage, refreshAfterWrite, saveSession, areaNames, escapeHtml, datetime } = api;
+  const { rpc, writeRpc, getSession, getPage, refreshAfterWrite, saveSession, requireLogin, areaNames, escapeHtml, datetime } = api;
   const managerRoles = new Set(["manager", "deputy", "supervisor"]);
   const positionNames = new Map();
   let currentData = null;
@@ -114,14 +114,17 @@ export function createActions(api) {
     if (working) return { ok: false, error: new Error("操作正在处理中") };
     working = true; busyButtons(true); setSheetError("");
     try {
-      const result = await rpc(name, { p_session_token: token(), ...params });
+      const result = await writeRpc(name, { p_session_token: token(), ...params });
+      if (result && typeof result === "object" && result.ok === false) throw new Error(result.message || "操作未完成");
+      let refreshOk = true;
+      try { await refreshAfterWrite(); }
+      catch { refreshOk = false; }
       working = false;
       if (!options.keepSheet) closeSheet();
       working = true;
-      if (success) notice(success);
-      try { await refreshAfterWrite(); }
-      catch { notice("操作已提交，但最新现场数据暂时读取失败。请稍后点击刷新核对。", true); }
-      return { ok: true, result };
+      if (refreshOk && success) notice(success);
+      if (!refreshOk) notice("操作已提交，但最新现场数据读取失败。请点击刷新核对，不要重复提交。", true);
+      return { ok: true, result, refreshOk };
     } catch (error) {
       working = false;
       if (options.onError && options.onError(error)) return { ok: false, error };
@@ -336,7 +339,7 @@ export function createActions(api) {
       } },
       ...(canEdit ? [{ label: "生成未到岗名单", action: async () => {
         const result = await callWrite("rpc_initialize_today_not_arrived", {}, "未到岗名单已更新。 ");
-        if (result.ok) notice(`本次新增 ${Number(result.result) || 0} 名未到岗人员。`);
+        if (result.ok && result.refreshOk && result.result !== null && result.result !== "") notice(`本次新增 ${Number(result.result) || 0} 名未到岗人员。`);
       } }] : []),
       { label: "新增临时兼职", action: openTempEntry },
       { label: "关闭", action: closeSheet }
@@ -406,7 +409,7 @@ export function createActions(api) {
     if (outcome.ok) showTempResult(outcome.result, draft);
   }
   function showTempResult(result, draft) {
-    renderSheet({ title: "已加入今日人员名单", body: `<div class="result-card"><strong>${e(result?.staff_id || "—")}</strong><p>${e(result?.name || draft.name)}</p><p>今日排班：${e(datetime(draft.start, true))} – ${e(datetime(draft.end, true))}</p><p>现场状态：未到岗</p><p>未自动生成 PIN；如需本人参与安全交接，店长可单独初始化 PIN。</p></div>`, buttons: [{ label: "完成", primary: true, action: closeSheet }] });
+    renderSheet({ title: "已加入今日人员名单", body: `<div class="result-card"><strong>${e(result?.staff_id || "请在今日人员核对新编号")}</strong><p>${e(result?.name || draft.name)}</p><p>今日排班：${e(datetime(draft.start, true))} – ${e(datetime(draft.end, true))}</p><p>现场状态：未到岗</p><p>未自动生成 PIN；如需本人参与安全交接，店长可单独初始化 PIN。</p></div>`, buttons: [{ label: "完成", primary: true, action: closeSheet }] });
   }
 
   function assignmentFields(positions, allowSafety, preset = {}) {
@@ -535,6 +538,10 @@ export function createActions(api) {
       const outcome = await callWrite("pin_manager_issue_temp", { p_target_staff_id: staffId }, null, { keepSheet: true });
       if (!outcome.ok) return;
       const temporaryPin = outcome.result?.temporary_pin;
+      if (!temporaryPin) {
+        renderSheet({ title: "未返回临时 PIN", description: "签发请求已提交，但响应没有临时 PIN。无法当面告知员工；请重新签发一组。", buttons: [{ label: "关闭", primary: true, action: closeSheet }] });
+        return;
+      }
       renderSheet({ title: "临时 PIN · 仅显示一次", description: `请当面告知 ${row.name}，员工登录后需要修改。关闭后本页面不再保存或显示。`, body: `<div class="one-time-pin">${e(temporaryPin || "签发失败，请核对")}</div>`, buttons: [{ label: "我已当面告知，关闭", primary: true, action: closeSheet }] });
     });
   }
@@ -547,7 +554,8 @@ export function createActions(api) {
         if (working) return;
         working = true; busyButtons(true);
         try {
-          const result = await rpc("pin_change", { p_session_token: token(), p_current_pin: oldPin, p_new_pin: newPin });
+          const result = await writeRpc("pin_change", { p_session_token: token(), p_current_pin: oldPin, p_new_pin: newPin });
+          if (result === null || result === "") { requireLogin("PIN 修改已提交，但未返回新会话。请用新 PIN 重新登录。 "); return; }
           if (!result?.ok) { setSheetError(result?.message || "修改失败，请核对当前 PIN。 "); return; }
           saveSession({ ...getSession(), ...result, must_change_pin: false });
           working = false; closeSheet(); notice("PIN 已修改，新的登录会话已启用。 ");

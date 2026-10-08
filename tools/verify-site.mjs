@@ -25,4 +25,4 @@ if (/sb_secret_|service_role|postgres(?:ql)?:\/\/|SUPABASE_DB_PASSWORD/.test(all
 if (/\b(?:PIN|pin|token|session_token)\s*[:=]\s*['\"][^'\"]+['\"]/.test(all)) {
   throw new Error('Possible hardcoded PIN or session token detected.');
 }
-console.log('013.1 static site verified for Pages subpath.');
+console.log('013.2 static site verified for Pages subpath.');
