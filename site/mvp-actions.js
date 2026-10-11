@@ -1,6 +1,6 @@
 // 013: 手机写操作仅使用既有 public RPC；规则和权限仍由数据库决定。
 export function createActions(api) {
-  const { rpc, writeRpc, getSession, getPage, refreshAfterWrite, saveSession, requireLogin, areaNames, escapeHtml, datetime } = api;
+  const { rpc, writeRpc, getSession, getPage, navigatePage, refreshAfterWrite, saveSession, requireLogin, areaNames, escapeHtml, datetime } = api;
   const managerRoles = new Set(["manager", "deputy", "supervisor"]);
   const positionNames = new Map();
   let currentData = null;
@@ -318,7 +318,14 @@ export function createActions(api) {
       } else if (row.has_pending_handoff) actions.push({ label: "查看交接", action: () => openRelatedHandoff(row) });
       else actions.push({ label: "先处理顶岗关系", action: () => notice("员工仍在顶岗，须先完成对应安全交接。", true) });
     }
-    if (p === "monitoring" && ["meal", "short_leave"].includes(row.status)) actions.push({ label: "返岗", action: () => returnFromBreak(row) });
+    if (p === "monitoring" && ["meal", "short_leave"].includes(row.status)) {
+      const safetyReturn = row.return_assignment_type === "position" && positionById(row.return_position_id)?.is_safety_critical;
+      actions.push(safetyReturn
+        ? row.staff_id === getSession()?.staff_id
+          ? { label: "前往本人页发起安全返岗", action: () => { closeSheet(); navigatePage("my"); } }
+          : { label: "通知员工本人发起安全返岗", action: () => renderSheet({ title: `${row.name} · 安全返岗`, description: "安全返岗由员工本人使用自己的账号发起；请通知该员工打开“我的”页面。当前人员卡不能代替本人确认。", buttons: [{ label: "关闭", action: closeSheet }] }) }
+        : { label: "返岗", action: () => returnFromBreak(row) });
+    }
     if (p === "monitoring" && row.status && row.status !== "not_arrived" && row.status !== "off_duty") actions.push({ label: "异常真实离岗", action: () => openEmergency(row), danger: true });
     const elapsed = ["meal", "short_leave"].includes(row.status) && row.status_since
       ? Math.max(0, Math.floor((Date.now() - new Date(row.status_since).getTime()) / 60000)) : null;
@@ -732,15 +739,45 @@ export function createActions(api) {
       } }
     ] });
   }
-  function openMySafetyReturn(row) {
-    renderSheet({ title: "申请安全岗返岗交接", description: "返岗人本人发起；由当前顶岗人交还岗位，双方完成确认后才恢复正式占岗。", body: field("当前顶岗人员工编号", "outgoing", "text", "", 'autocomplete="off" placeholder="例如 FT002"'), buttons: [
-      { label: "返回", action: closeSheet },
-      { label: "发起返岗交接", primary: true, action: () => {
-        const outgoing = value("outgoing").toUpperCase();
-        if (!outgoing) { setSheetError("请填写当前顶岗人员工编号。 "); return; }
-        callWrite("rpc_live_request_handoff", { p_flow: "return", p_action: "return", p_position: row.return_position_id, p_outgoing: outgoing, p_incoming: getSession().staff_id, p_next_type: null, p_next_position: null, p_next_area: null }, "安全岗返岗交接已发起。 ");
-      } }
-    ] });
+  async function openMySafetyReturn(row) {
+    renderSheet({ title: "申请安全岗返岗交接", description: "正在核对返岗岗位的实时占岗人…" });
+    const loadingSheet = sheet;
+    let target;
+    try { target = await rpc("rpc_my_return_position", { p_session_token: token() }); }
+    catch (error) { if (sheet === loadingSheet) setSheetError(explain(error)); return; }
+    if (sheet !== loadingSheet) return;
+    if (!target || target.position_id !== row.return_position_id || !target.is_safety_critical) {
+      setSheetError("返岗目标已变化，请刷新“我的”页面后重试。"); return;
+    }
+    if (!target.expected_open) {
+      setSheetError("该安全岗今天未启用。请先由管理人员核对岗位状态。"); return;
+    }
+    if (target.pending_handoff_id) {
+      setSheetError("该岗位已有未完成交接，请先处理现有交接。"); return;
+    }
+    const positionName = target.position_name || target.position_id;
+    const outgoing = target.current_staff_id;
+    if (!outgoing && row.status !== "short_leave") {
+      renderSheet({ title: `${positionName} · 返岗`, body: `<p class="sheet-hint">该岗位当前为空岗。现有空岗返岗特殊流程只适用于真实短离；请管理人员先核对饭休与顶岗关系，不能伪造交接人。</p>`, buttons: [{ label: "关闭", action: closeSheet }] });
+      return;
+    }
+    if (outgoing && !target.current_staff_covers_me) {
+      renderSheet({ title: `${positionName} · 返岗`, body: `<p class="sheet-hint">当前由 ${e(target.current_staff_name || outgoing)} 正式值守，但不是你的顶岗人。不能伪造交接关系；请管理人员先核对现场。</p>`, buttons: [{ label: "关闭", action: closeSheet }] });
+      return;
+    }
+    const gap = !outgoing;
+    renderSheet({ title: `${positionName} · 安全返岗`, description: gap
+      ? `${positionName}当前为空岗，将按安全空岗返岗流程处理。你本人出发并到位后，由管理人员最终确认补岗。`
+      : `当前由 ${target.current_staff_name || outgoing} 顶岗。你本人出发并到位后，由该员工确认交还。`,
+      buttons: [
+        { label: "返回", action: closeSheet },
+        { label: gap ? "发起空岗返岗" : "发起返岗交接", primary: true, action: () => callWrite("rpc_live_request_handoff", {
+          p_flow: gap ? "gap" : "return", p_action: gap ? "fill" : "return",
+          p_position: target.position_id, p_outgoing: outgoing || null,
+          p_incoming: getSession().staff_id, p_next_type: null,
+          p_next_position: null, p_next_area: null
+        }, gap ? "空岗返岗已发起。请本人点击开始前往，到位后由管理人员确认。" : "安全岗返岗交接已发起。") }
+      ] });
   }
 
   return { decorate, dismiss };

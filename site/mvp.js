@@ -392,6 +392,7 @@ actions = createActions({
   writeRpc,
   getSession: () => session,
   getPage: () => page,
+  navigatePage: selectPage,
   refreshAfterWrite: async () => {
     for (const name of Object.keys(cache)) if (name !== page) delete cache[name];
     if (!await refresh(true)) throw new Error("写入后的现场数据尚未读取成功");

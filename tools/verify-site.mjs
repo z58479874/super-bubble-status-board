@@ -15,6 +15,9 @@ for (const name of ['mvp.js', 'mvp.css', 'mvp-actions.css', 'config.js', 'icon.s
 if (!app.includes('import { createActions } from "./mvp-actions.js"')) {
   throw new Error('013 action module is not loaded.');
 }
+if (!readFileSync(resolve(root, 'mvp-actions.js'), 'utf8').includes('rpc_my_return_position')) {
+  throw new Error('013.4 safety return read RPC is not included.');
+}
 if (!config.includes('https://hlgrxhuqflyoulwoyrrr.supabase.co') || !config.includes('sb_publishable_')) {
   throw new Error('Expected Supabase project or browser publishable key is missing.');
 }
@@ -25,5 +28,5 @@ if (/sb_secret_|service_role|postgres(?:ql)?:\/\/|SUPABASE_DB_PASSWORD/.test(all
 if (/\b(?:PIN|pin|token|session_token)\s*[:=]\s*['\"][^'\"]+['\"]/.test(all)) {
   throw new Error('Possible hardcoded PIN or session token detected.');
 }
-console.log('013.3 static site verified for Pages subpath.');
+console.log('013.4 static site verified for Pages subpath.');
 
