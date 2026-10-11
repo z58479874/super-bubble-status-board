@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..', 'site');
-const files = ['index.html', 'mvp.js', 'mvp.css', 'mvp-actions.js', 'mvp-actions.css', 'config.js', 'icon.svg', '.nojekyll'];
+const files = ['index.html', 'mvp.js', 'mvp.css', 'mvp-actions.js', 'mvp-actions.css', 'displayLabels.js', 'config.js', 'icon.svg', '.nojekyll'];
 for (const name of files) {
   if (!existsSync(resolve(root, name))) throw new Error(`Missing site asset: ${name}`);
 }
@@ -28,5 +28,11 @@ if (/sb_secret_|service_role|postgres(?:ql)?:\/\/|SUPABASE_DB_PASSWORD/.test(all
 if (/\b(?:PIN|pin|token|session_token)\s*[:=]\s*['\"][^'\"]+['\"]/.test(all)) {
   throw new Error('Possible hardcoded PIN or session token detected.');
 }
-console.log('013.4 static site verified for Pages subpath.');
+console.log('014 static site verified for Pages subpath.');
 
+
+for (const name of ['mvp.js','mvp-actions.js']) {
+  if (!readFileSync(resolve(root,name),'utf8').includes('./displayLabels.js')) throw new Error('Shared Chinese display module missing');
+}
+if (!app.includes('renderDispatch')) throw new Error('014 dispatch view missing');
+if (/https:\/\/(?:fonts\.|cdn\.|unpkg\.|cdnjs\.)/.test(all)) throw new Error('External CDN dependency found');

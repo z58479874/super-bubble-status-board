@@ -100,3 +100,20 @@ button:disabled{cursor:wait;opacity:.6}
 @media(max-width:680px){.dashboard-screen{padding:0 15px 100px}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.coverage-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.position-grid{grid-template-columns:1fr}.card{padding:13px}.page-title h1{font-size:21px}}
 @media(max-width:390px){.dashboard-screen{padding-left:12px;padding-right:12px}.header-brand strong{font-size:16px}.metric{padding:11px;min-height:84px}.metric strong{font-size:25px}.coverage-grid{gap:7px}.coverage-number{font-size:21px}.nav-button{font-size:10px}}
 @media(min-width:850px){.content{max-width:1080px}.position-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.coverage-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
+/* 014：安全、区域、人力、交接依次呈现；不引入字体或CDN。 */
+button.card{text-align:left;display:block;width:100%;font-family:inherit;color:inherit;cursor:pointer;touch-action:manipulation;min-height:48px}
+.quiet-line{padding:14px 15px;border:1px solid #e4e8e8;border-radius:12px;background:#fafbfb;color:#5d6a73;font-size:13px;line-height:1.5}
+.safety-summary{padding:14px 15px;border-radius:12px;background:#fff0ef;color:#a33430;margin-bottom:9px;line-height:1.5;font-size:17px}
+.coverage-card p{margin:8px 0 0}.coverage-card strong{font-size:18px}.coverage-card.is-focused{outline:2px solid #6483a4;outline-offset:2px}
+.field-metrics{grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}.field-metrics .metric{padding:10px 8px;min-height:76px;border-radius:11px}.field-metrics .metric span{font-size:11px}.field-metrics .metric strong{font-size:24px;margin-top:7px}
+.roster-note{font-size:12px;margin:9px 0}.focus-note{border-left:3px solid #6683a1;background:#f0f5fa;padding:10px 12px;margin:14px 0;color:#4a6480;font-size:13px}
+.source-risk{background:#fff4e5;color:#865321!important;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.55}
+.my-arrangement{font-size:19px;font-weight:750;color:#344c60;line-height:1.5;margin:8px 0}.my-schedule{margin-top:14px;color:#6c7881;font-size:12px}.my-schedule summary{min-height:35px;cursor:pointer}
+.break-clock{padding:12px;border-radius:9px;background:#fff4e6;color:#99622c;font-size:16px;font-weight:800;line-height:1.5;margin-top:12px}
+.task-card.task-active{border-color:#92afca;background:#f6faff}.task-destination{font-size:20px;font-weight:850;line-height:1.5;margin:14px 0 8px;color:#334f6a}
+.task-active .action-button.primary{width:100%;background:#416e98;border-color:#416e98;font-size:18px;min-height:56px}
+.explain-button{background:#f2f4f4!important;border-color:#dce1e2!important;color:#73808a!important}.safety-guidance{font-size:12px;color:#687781;line-height:1.6;margin:14px 0 0}
+.debug-error{font-size:12px;color:#687781;margin:10px 0}.debug-error summary{min-height:40px;cursor:pointer}.debug-error pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:160px;overflow:auto;background:#f4f6f7;padding:10px;border-radius:8px}
+.card-row .pill{white-space:normal;text-align:center;max-width:48%}.section-title h2{font-size:16px;margin:0}.lifecycle-section{margin-top:22px}
+@media(max-width:430px){.coverage-grid{grid-template-columns:1fr}.field-metrics{grid-template-columns:repeat(5,minmax(0,1fr))}.field-metrics .metric{padding:9px 5px}.field-metrics .metric span{font-size:10px}.field-metrics .metric strong{font-size:22px}}

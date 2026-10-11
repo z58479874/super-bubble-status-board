@@ -1,6 +1,7 @@
+import { roleNames, employmentNames, modeNames, stateNames, label as displayLabel, areaLabel, positionLabel, statusLabel, handoffStage, nextActionNames, businessError, debugError, safetyPositionIds } from "./displayLabels.js";
 // 013: 手机写操作仅使用既有 public RPC；规则和权限仍由数据库决定。
 export function createActions(api) {
-  const { rpc, writeRpc, getSession, getPage, navigatePage, refreshAfterWrite, saveSession, requireLogin, areaNames, escapeHtml, datetime } = api;
+  const { rpc, writeRpc, getSession, getPage, navigatePage, getSharedData, refreshAfterWrite, saveSession, requireLogin, areaNames, escapeHtml, datetime } = api;
   const managerRoles = new Set(["manager", "deputy", "supervisor"]);
   const positionNames = new Map();
   let currentData = null;
@@ -9,14 +10,12 @@ export function createActions(api) {
   let tempDraft = null;
   let noticeTimer = null;
   let directoryRows = null;
-  const roleNames = { manager: "店长", deputy: "副店长", supervisor: "主管", staff: "员工" };
-  const employmentNames = { full_time: "全职", regular_part_time: "固定兼职", temporary_part_time: "临时兼职" };
-
+  let directoryReadAt = 0;
   const e = escapeHtml;
   const $ = (selector, root = sheet) => root?.querySelector(selector);
   const isManager = () => managerRoles.has(getSession()?.role);
   const token = () => getSession()?.session_token;
-  const overview = () => currentData?.rpc_today_overview || currentData?.rpc_my_today_state || {};
+  const overview = () => getPage() === 'my' ? currentData?.rpc_my_today_state || {} : currentData?.rpc_today_overview || {};
   const phase = () => overview().phase || "not_prepared";
   const staffRows = () => currentData?.rpc_today_staff || [];
   const positionRows = () => currentData?.rpc_today_positions || [];
@@ -28,15 +27,7 @@ export function createActions(api) {
   const defaultStart = () => `${nowBusinessDate()}T09:00`;
   const defaultEnd = () => `${nowBusinessDate()}T21:00`;
 
-  function explain(error) {
-    const message = String(error?.message || "");
-    if (/安全关键岗必须先发起交接|安全关键岗.*双确认|安全岗.*交接/.test(message)) return "安全关键岗必须走双确认交接。请先发起交接，再由接岗人本人点击开始前往。";
-    if (/吃饭|meal/.test(message) && /低于最低|覆盖/.test(message)) return "当前离岗会使区域低于最低人数，请先安排替岗人员。";
-    if (/仍在交接|顶安全岗|正式占据在用安全关键岗/.test(message)) return `当前不能直接操作：${message}`;
-    if (/超时|网络|fetch|connection/i.test(message)) return "数据连接异常，请检查网络后重试。";
-    if (/\p{Script=Han}/u.test(message)) return message;
-    return "操作未完成。请刷新状态后重试；若持续失败，请联系店长核对现场数据。";
-  }
+  const explain = businessError;
   function notice(message, error = false) {
     let bar = document.getElementById("actionNotice");
     if (!bar) { bar = document.createElement("div"); bar.id = "actionNotice"; bar.setAttribute("role", "status"); document.body.append(bar); }
@@ -59,9 +50,18 @@ export function createActions(api) {
     directoryRows = null;
     document.body.classList.remove("sheet-open");
   }
-  function setSheetError(message) {
+  function setSheetError(message, rawError = null) {
     const box = $(".sheet-error");
-    if (box) { box.textContent = message; box.hidden = !message; }
+    if (box) {
+      box.textContent = message; box.hidden = !message;
+      sheet?.querySelector(".debug-error")?.remove();
+      if (rawError && isManager()) {
+        const detail = document.createElement("details"); detail.className = "debug-error";
+        const summary = document.createElement("summary"); summary.textContent = "查看详细错误";
+        const text = document.createElement("pre"); text.textContent = debugError(rawError);
+        detail.append(summary,text); box.after(detail);
+      }
+    }
     else notice(message, true);
   }
   function renderSheet({ title, description = "", body = "", buttons = [], onOpen, fullScreen = false }) {
@@ -115,6 +115,7 @@ export function createActions(api) {
     working = true; busyButtons(true); setSheetError("");
     try {
       const result = await writeRpc(name, { p_session_token: token(), ...params });
+      directoryRows = null;
       if (result && typeof result === "object" && result.ok === false) throw new Error(result.message || "操作未完成");
       let refreshOk = true;
       try { await refreshAfterWrite(); }
@@ -128,7 +129,7 @@ export function createActions(api) {
     } catch (error) {
       working = false;
       if (options.onError && options.onError(error)) return { ok: false, error };
-      setSheetError(explain(error));
+      setSheetError(explain(error), error);
       return { ok: false, error };
     } finally { working = false; busyButtons(false); }
   }
@@ -152,7 +153,7 @@ export function createActions(api) {
   }
 
   function decorate(page, data, content) {
-    currentData = data;
+    currentData = { ...getSharedData(), ...data };
     if (data.rpc_today_positions) for (const item of data.rpc_today_positions) positionNames.set(item.position_id, item.name);
     if (isManager() && page === "home") decorateLifecycle(content);
     if (isManager() && page === "staff") decorateStaff(content);
@@ -166,7 +167,7 @@ export function createActions(api) {
     const section = document.createElement("section");
     section.className = "section lifecycle-section";
     const mode = overview().operation_mode;
-    section.innerHTML = `<div class="section-title"><h2>今日营业操作</h2></div><div class="lifecycle-card"><p>${e(p === "not_prepared" ? "先建立今天的营业日，再安排人员和选择模式。" : p === "not_started" ? `准备阶段 · 当前模式：${({ green: "绿灯", yellow: "黄灯", red: "红灯" })[mode] || "尚未选择"}` : p === "monitoring" ? "营业监控已启动，安全岗位与区域人数正在持续检查。" : "今日营业已结束，现场状态仅供查看。")}</p><div class="lifecycle-actions"></div></div>`;
+    section.innerHTML = `<div class="section-title"><h2>今日营业操作</h2></div><div class="lifecycle-card"><p>${e(p === "not_prepared" ? "先建立今天的营业日，再安排人员和选择模式。" : p === "not_started" ? `准备阶段 · 当前模式：${displayLabel(modeNames,mode,"尚未选择")}` : p === "monitoring" ? "营业监控已启动，安全岗位与区域人数正在持续检查。" : "今日营业已结束，现场状态仅供查看。")}</p><div class="lifecycle-actions"></div></div>`;
     const row = section.querySelector(".lifecycle-actions");
     if (p === "not_prepared") row.append(actionButton("准备今天", () => callWrite("rpc_prepare_today", {}, "今天的营业日已准备。"), true));
     if (p === "not_started") {
@@ -175,14 +176,14 @@ export function createActions(api) {
       row.append(actionButton("开始营业", openStartMonitoring, true));
     }
     if (p === "monitoring") row.append(actionButton("结束营业", openEndBusinessDay));
-    content.querySelector(".page-title")?.after(section);
+    content.querySelector("#lifecycleSlot")?.append(section);
   }
   function openMode() {
     const current = overview().operation_mode;
-    renderSheet({ title: "选择今日模式", description: "模式载入当天岗位与区域覆盖规则。", body: current ? `<p class="sheet-hint">当前已选：${e(({ green: "绿灯", yellow: "黄灯", red: "红灯" })[current] || current)}。切换模式需要明确确认。</p>` : "", buttons: [
+    renderSheet({ title: "选择今日模式", description: "模式载入当天岗位与区域覆盖规则。", body: current ? `<p class="sheet-hint">当前已选：${e(displayLabel(modeNames,current))}。切换模式需要明确确认。</p>` : "", buttons: [
       ...[["green", "绿灯"], ["yellow", "黄灯"], ["red", "红灯"]].map(([id, label]) => ({ label, action: () => {
         if (current === id) { notice(`今日已选择${label}。`); closeSheet(); return; }
-        if (current) confirm("确认改选今日模式", `当前为${({ green: "绿灯", yellow: "黄灯", red: "红灯" })[current]}。确认改为${label}？当天岗位与覆盖快照可能变化。`, `改为${label}`, () => callWrite("rpc_select_today_mode", { p_mode: id }, `今日模式已改为${label}。`));
+        if (current) confirm("确认改选今日模式", `当前为${displayLabel(modeNames,current)}。确认改为${label}？当天岗位与覆盖快照可能变化。`, `改为${label}`, () => callWrite("rpc_select_today_mode", { p_mode: id }, `今日模式已改为${label}。`));
         else callWrite("rpc_select_today_mode", { p_mode: id }, `今日已选择${label}。`);
       } })),
       { label: "取消", action: closeSheet }
@@ -227,10 +228,11 @@ export function createActions(api) {
     }
   }
   async function loadDirectory() {
-    if (directoryRows) return directoryRows;
+    if (directoryRows && Date.now() - directoryReadAt < 60000) return directoryRows;
     const rows = await rpc("rpc_staff_directory", { p_session_token: token() });
     if (!Array.isArray(rows)) throw new Error("员工名册返回格式不正确");
     directoryRows = rows;
+    directoryReadAt = Date.now();
     return rows;
   }
   async function openDirectory() {
@@ -249,7 +251,7 @@ export function createActions(api) {
           const update = () => {
             const query = search.value.trim().toLocaleLowerCase();
             const shown = rows.filter(row => `${row.name} ${row.id}`.toLocaleLowerCase().includes(query));
-            list.innerHTML = shown.length ? shown.map(row => `<button type="button" class="directory-entry" data-directory-id="${e(row.id)}"><span><strong>${e(row.name)}</strong><small>${e(row.id)} · ${e(row.department)} · ${e(roleNames[row.role] || row.role)} · ${e(employmentNames[row.employment_type] || row.employment_type)}</small></span><span class="pill ${row.active ? "green" : "gray"}">${row.active ? "启用" : "停用"}</span></button>`).join("") : `<p class="sheet-hint">没有匹配的员工。</p>`;
+            list.innerHTML = shown.length ? shown.map(row => `<button type="button" class="directory-entry" data-directory-id="${e(row.id)}"><span><strong>${e(row.name)}</strong><small>${e(row.id)} · ${e(row.department)} · ${e(displayLabel(roleNames,row.role))} · ${e(displayLabel(employmentNames,row.employment_type))}</small></span><span class="pill ${row.active ? "green" : "gray"}">${row.active ? "启用" : "停用"}</span></button>`).join("") : `<p class="sheet-hint">没有匹配的员工。</p>`;
           };
           search.addEventListener("input", update);
           list.addEventListener("click", event => {
@@ -271,12 +273,12 @@ export function createActions(api) {
     const loadingSheet = sheet;
     let row;
     try { row = (await loadDirectory()).find(item => item.id === staffId); }
-    catch (error) { if (sheet === loadingSheet) setSheetError(explain(error)); return; }
+    catch (error) { if (sheet === loadingSheet) setSheetError(explain(error), error); return; }
     if (sheet !== loadingSheet) return;
     if (!row) row = fallback && { ...fallback, id: fallback.staff_id };
     if (!row) { setSheetError("员工档案未找到，请重新打开名册。 "); return; }
     const today = staffById(staffId);
-    const detail = `<dl class="staff-detail-grid"><div><dt>姓名</dt><dd>${e(row.name)}</dd></div><div><dt>员工编号</dt><dd>${e(row.id)}</dd></div><div><dt>部门</dt><dd>${e(row.department)}</dd></div><div><dt>角色</dt><dd>${e(roleNames[row.role] || row.role)}</dd></div><div><dt>用工类型</dt><dd>${e(employmentNames[row.employment_type] || row.employment_type)}</dd></div><div><dt>是否启用</dt><dd>${row.active ? "启用" : "停用"}</dd></div></dl><div class="sheet-subsection"><strong>可安排岗位</strong><p>数量和明细：当前员工名册接口未提供，不能根据今日排班推算。</p></div>${today ? `<div class="sheet-subsection"><strong>今日现场（仅供查看）</strong><p>${e(today.status_display || today.status || "状态待初始化")} · ${e(today.roster_status === "cancelled" ? "排班已取消" : "今日已排班")}</p></div>` : ""}${!row.active ? `<p class="sheet-hint">该员工已停用，现有 PIN 接口会拒绝签发。</p>` : row.id === getSession()?.staff_id ? `<p class="sheet-hint">本人 PIN 请在“我的”页面修改；管理重置接口不允许重置自己的 PIN。</p>` : ""}`;
+    const detail = `<dl class="staff-detail-grid"><div><dt>姓名</dt><dd>${e(row.name)}</dd></div><div><dt>员工编号</dt><dd>${e(row.id)}</dd></div><div><dt>部门</dt><dd>${e(row.department)}</dd></div><div><dt>角色</dt><dd>${e(displayLabel(roleNames,row.role))}</dd></div><div><dt>用工类型</dt><dd>${e(displayLabel(employmentNames,row.employment_type))}</dd></div><div><dt>是否启用</dt><dd>${row.active ? "启用" : "停用"}</dd></div></dl><div class="sheet-subsection"><strong>可安排岗位</strong><p>数量和明细：当前员工名册接口未提供，不能根据今日排班推算。</p></div>${today ? `<div class="sheet-subsection"><strong>今日现场（仅供查看）</strong><p>${e(statusLabel(today))} · ${e(today.roster_status === "cancelled" ? "排班已取消" : "今日已排班")}</p></div>` : ""}${!row.active ? `<p class="sheet-hint">该员工已停用，现有 PIN 接口会拒绝签发。</p>` : row.id === getSession()?.staff_id ? `<p class="sheet-hint">本人 PIN 请在“我的”页面修改；管理重置接口不允许重置自己的 PIN。</p>` : ""}`;
     renderSheet({ title: `${row.name} · 员工详情`, description: "人员资料操作与今日现场操作分开", body: detail,
       buttons: [
         ...(getSession()?.role === "manager" ? [{ label: "初始化/重置PIN", primary: true, action: () => {
@@ -309,7 +311,10 @@ export function createActions(api) {
       }
     }
     if (p === "monitoring" && row.status === "on_duty" && row.current_assignment_type !== "in_transit") {
-      if (safety) actions.push({ label: "发起安全岗交接", action: () => openSafetyManagement(row) });
+      if (safety) {
+        actions.push({ label: "发起安全岗交接", primary: true, action: () => openSafetyManagement(row) });
+        for (const name of ["调岗", "吃饭", "短离", "下班"]) actions.push({ label: `${name} · 请先交接`, action: () => safetyExplanation() });
+      }
       else if (!row.is_temporary_cover && !row.has_pending_handoff) {
         actions.push({ label: "调岗", action: () => openAssignment("transfer", row, false) });
         actions.push({ label: "开始吃饭", action: () => startBreak(row, "meal") });
@@ -330,7 +335,7 @@ export function createActions(api) {
     const elapsed = ["meal", "short_leave"].includes(row.status) && row.status_since
       ? Math.max(0, Math.floor((Date.now() - new Date(row.status_since).getTime()) / 60000)) : null;
     const timing = Number.isFinite(elapsed) ? `<p class="sheet-hint">${row.status === "meal" ? "已吃饭" : "已短离"} ${elapsed} 分钟；以数据库状态开始时间计时。</p>` : "";
-    renderSheet({ title: `${row.name} · 现场操作`, description: `${row.staff_id} · ${row.status_display || row.status || "已排班"}`, body: timing, buttons: [...actions, { label: "关闭", action: closeSheet }] });
+    renderSheet({ title: `${row.name} · 现场操作`, description: `${row.staff_id} · ${statusLabel(row)}`, body: timing + (safety ? '<p class="sheet-hint">当前值守安全关键岗，请先完成岗位交接</p>' : ""), buttons: [...actions, { label: "关闭", action: closeSheet }] });
   }
 
   async function openRelatedHandoff(row) {
@@ -340,19 +345,19 @@ export function createActions(api) {
       const related = (handoffs || []).find(item => [item.incoming_staff_id, item.outgoing_staff_id].includes(row.staff_id));
       if (related) openHandoffActions(related);
       else renderSheet({ title: `${row.name} · 交接`, body: `<p class="sheet-hint">当前没有未完成交接，请刷新今日人员状态。</p>`, buttons: [{ label: "关闭", action: closeSheet }] });
-    } catch (error) { setSheetError(explain(error)); }
+    } catch (error) { setSheetError(explain(error), error); }
   }
 
   async function openRoster() {
     if (phase() === "ended") { notice("今日营业已结束，不能再修改今日排班。", true); return; }
     renderSheet({ title: "今日排班", description: "正在读取员工目录…" });
     let directory;
-    try { directory = await rpc("rpc_staff_directory", { p_session_token: token() }); }
-    catch (error) { setSheetError(explain(error)); return; }
+    try { directory = await loadDirectory(); }
+    catch (error) { setSheetError(explain(error), error); return; }
     const existing = new Map(staffRows().map(row => [row.staff_id, row]));
     const selectable = (directory || []).filter(row => row.active && !existing.has(row.id));
     const canEdit = phase() === "not_started";
-    const body = `<p class="sheet-hint">已排班 ${[...existing.values()].filter(row => row.roster_status === "scheduled").length} 人。${canEdit ? "开园前可加入、调整或取消。" : "营业中可临时加入已有员工增援。"}</p><label class="sheet-field">选择已有员工<select name="staffId"><option value="">请选择</option>${selectable.map(row => `<option value="${e(row.id)}">${e(row.name)} · ${e(row.id)} · ${e(row.employment_type)}</option>`).join("")}</select></label>${field("预计上班时间（北京时间）", "start", "datetime-local", defaultStart())}${field("预计下班时间（北京时间）", "end", "datetime-local", defaultEnd())}<div class="sheet-subsection"><strong>今日名单</strong>${[...existing.values()].map(row => `<p>${e(row.name)} · ${e(row.staff_id)} · ${row.roster_status === "cancelled" ? "已取消" : row.status_display || "已排班"}</p>`).join("") || "<p>暂无排班人员</p>"}</div>`;
+    const body = `<p class="sheet-hint">已排班 ${[...existing.values()].filter(row => row.roster_status === "scheduled").length} 人。${canEdit ? "开园前可加入、调整或取消。" : "营业中可临时加入已有员工增援。"}</p><label class="sheet-field">选择已有员工<select name="staffId"><option value="">请选择</option>${selectable.map(row => `<option value="${e(row.id)}">${e(row.name)} · ${e(row.id)} · ${e(displayLabel(employmentNames,row.employment_type))}</option>`).join("")}</select></label>${field("预计上班时间（北京时间）", "start", "datetime-local", defaultStart())}${field("预计下班时间（北京时间）", "end", "datetime-local", defaultEnd())}<div class="sheet-subsection"><strong>今日名单</strong>${[...existing.values()].map(row => `<p>${e(row.name)} · ${e(row.staff_id)} · ${row.roster_status === "cancelled" ? "已取消" : row.status_display || "已排班"}</p>`).join("") || "<p>暂无排班人员</p>"}</div>`;
     renderSheet({ title: "今日排班", description: canEdit ? "从已有员工中选择今天实际来的人。" : "营业中增援仅加入已有在职人员。", body, buttons: [
       { label: canEdit ? "加入 / 更新排班" : "加入增援", primary: true, action: () => {
         const id = value("staffId"); if (!id) { setSheetError("请选择一名员工。 "); return; }
@@ -397,13 +402,13 @@ export function createActions(api) {
           const candidates = await rpc("rpc_temp_staff_candidates", { p_session_token: token(), p_name: name });
           tempDraft = { name, ...time, requestId: crypto.randomUUID() };
           openTempChoices(candidates || []);
-        } catch (error) { setSheetError(explain(error)); }
+        } catch (error) { setSheetError(explain(error), error); }
       } }
     ] });
   }
   function openTempChoices(candidates) {
     const draft = tempDraft;
-    const rows = candidates.map(item => `<div class="candidate-card"><strong>${e(item.staff_name)} · ${e(item.staff_id)}</strong><small>${e(item.employment_type)} · ${item.active ? "活跃" : "已停用"} · 最近排班 ${e(item.last_roster_day || "无")}</small></div>`).join("");
+    const rows = candidates.map(item => `<div class="candidate-card"><strong>${e(item.staff_name)} · ${e(item.staff_id)}</strong><small>${e(displayLabel(employmentNames,item.employment_type))} · ${item.active ? "活跃" : "已停用"} · 最近排班 ${e(item.last_roster_day || "无")}</small></div>`).join("");
     const eligible = candidates.filter(item => item.employment_type === "temporary_part_time");
     renderSheet({ title: "确认是否复用历史人员", description: `${draft.name} · 请人工核对同名者；姓名不能作为唯一身份。`, body: rows || `<p class="sheet-hint">未查到完全同名档案。请确认是新人员后创建。</p>`, buttons: [
       ...eligible.map(item => ({ label: `复用 ${item.staff_id}${item.active ? "" : "（重新启用）"}`, action: () => {
@@ -438,7 +443,7 @@ export function createActions(api) {
 
   function assignmentFields(positions, allowSafety, preset = {}) {
     const fixed = positions.filter(item => !item.is_mobile && item.snapshot_present !== false && item.expected_open === true && (allowSafety || !item.is_safety_critical));
-    const options = fixed.map(item => `<option value="${e(item.position_id)}" data-safety="${Boolean(item.is_safety_critical)}" ${preset.position === item.position_id ? "selected" : ""}>${e(areaNames[item.area_code] || item.area_code)} · ${e(item.name)}${item.expected_open ? "" : "（今日未启用）"}</option>`).join("");
+    const options = fixed.map(item => `<option value="${e(item.position_id)}" data-safety="${Boolean(item.is_safety_critical)}" ${preset.position === item.position_id ? "selected" : ""}>${e(areaLabel(item.area_code))} · ${e(item.name)}${item.expected_open ? "" : "（今日未启用）"}</option>`).join("");
     const areaOptions = Object.entries(areaNames).filter(([id]) => id !== "global").map(([id, label]) => `<option value="${e(id)}" ${preset.area === id ? "selected" : ""}>${e(label)}</option>`).join("");
     return `<label class="sheet-field">当前实际安排<select name="assignmentType"><option value="" ${!preset.type ? "selected" : ""}>请选择安排方式</option><option value="position" ${preset.type === "position" ? "selected" : ""}>具体岗位</option><option value="area_standby" ${preset.type === "area_standby" ? "selected" : ""}>区域待命</option><option value="mobile_pool" ${preset.type === "mobile_pool" ? "selected" : ""}>全场机动</option></select></label><label class="sheet-field" data-assignment-field="position">具体岗位<select name="position"><option value="">请选择</option>${options}</select></label><label class="sheet-field" data-assignment-field="area">所属区域<select name="area"><option value="">请选择</option>${areaOptions}</select></label><p class="sheet-hint" data-candidate-hint></p>`;
   }
@@ -494,10 +499,10 @@ export function createActions(api) {
     try {
       positions = await loadPositions();
       if (["arrival", "preassign"].includes(kind)) positions = await arrivalPositions(positions, row.staff_id);
-    } catch (error) { setSheetError(explain(error)); return; }
+    } catch (error) { setSheetError(explain(error), error); return; }
     const titles = { arrival: `确认 ${row.name} 到岗`, preassign: `调整 ${row.name} 的开园前安排`, transfer: `调动 ${row.name}`, return: `重新安排 ${row.name} 返岗`, cancel: "安排接岗人取消后的去向", outgoing: "交出安全岗后的去向" };
     const intro = kind === "arrival" || kind === "preassign" ? "到岗安排必须选实际岗位、区域待命或机动；开园前调整会记录操作流水。" : kind === "transfer" ? "普通调岗不得直接前往安全关键岗。" : kind === "return" ? "原返岗目标不能安全恢复，请另选合法安排。" : "只能选择非安全固定岗位、区域待命或机动池。";
-    renderSheet({ title: titles[kind], description: intro, body: assignmentFields(positions, allowSafety), buttons: [
+    renderSheet({ title: titles[kind], description: intro, body: assignmentFields(positions, allowSafety) + (kind === "transfer" ? sourceRisk(row, positions) : ""), buttons: [
       { label: "返回", action: closeSheet },
       { label: kind === "arrival" ? "确认到岗" : kind === "preassign" ? "保存开园前安排" : kind === "transfer" ? "开始前往" : kind === "return" ? "确认返岗" : "确认安排", primary: true, action: async () => {
         let target; try { target = selectedAssignment(); } catch (error) { setSheetError(error.message); return; }
@@ -538,7 +543,7 @@ export function createActions(api) {
             ] });
             return true;
           }
-          if (kind === "meal" && /低于最低|覆盖/.test(message)) { setSheetError("当前离岗会使区域低于最低人数，请先安排替岗人员。 "); return true; }
+          if (kind === "meal" && /低于最低|覆盖/.test(message)) { setSheetError(explain(error), error); return true; }
           return false;
         }
       });
@@ -599,10 +604,10 @@ export function createActions(api) {
         try {
           const result = await writeRpc("pin_change", { p_session_token: token(), p_current_pin: oldPin, p_new_pin: newPin });
           if (result === null || result === "") { requireLogin("PIN 修改已提交，但未返回新会话。请用新 PIN 重新登录。 "); return; }
-          if (!result?.ok) { setSheetError(result?.message || "修改失败，请核对当前 PIN。 "); return; }
+          if (!result?.ok) { setSheetError("PIN未修改成功，请核对原PIN；新PIN须为不同的6–8位数字。"); return; }
           saveSession({ ...getSession(), ...result, must_change_pin: false });
           working = false; closeSheet(); notice("PIN 已修改，新的登录会话已启用。 ");
-        } catch (error) { setSheetError(explain(error)); }
+        } catch (error) { setSheetError(explain(error), error); }
         finally { working = false; busyButtons(false); }
       } }
     ] });
@@ -623,7 +628,7 @@ export function createActions(api) {
     }
     actions.push({ label: row.expected_open ? "暂停今日岗位" : "恢复今日岗位", action: () => openSetPosition(row) });
     actions.push({ label: "关闭", action: closeSheet });
-    renderSheet({ title: row.name, description: row.is_safety_critical ? "安全关键岗按双确认交接；暂停/恢复必须填写原因。" : "岗位启闭只调整当天应开快照，不改长期模式模板。", buttons: actions });
+    renderSheet({ title: row.name, description: row.is_safety_critical ? "安全关键岗按双确认交接；暂停/恢复必须填写原因。" : "岗位启闭只调整当天应开快照，不改长期模式模板。", body: `<p class="sheet-hint">${e(areaLabel(row.area_code))} · ${row.expected_open ? "今日启用" : "今日未启用"}<br>当前值守：${e(row.current_staff_name || "当前无人")}${row.pending_handoff_id ? `<br>${e(handoffStage(row.pending_handoff_stage))}` : ""}</p>`, buttons: actions });
   }
   function openSetPosition(row) {
     const opening = !row.expected_open;
@@ -636,7 +641,7 @@ export function createActions(api) {
   }
 
   function openSafetyManagement(row) {
-    const position = positionById(row.current_position_id) || { position_id: row.current_position_id, name: positionNames.get(row.current_position_id) || row.current_position_id };
+    const position = positionById(row.current_position_id) || { position_id: row.current_position_id, name: positionNames.get(row.current_position_id) || positionLabel(row.current_position_id) };
     renderSheet({ title: `安全岗交接 · ${position.name}`, description: "饭休和短离须原占岗人本人发起；管理人员可办理调离、结束顶岗或空岗补位。", buttons: [
       { label: "交接后调离", action: () => openAssignment("outgoing", row, false, { done: target => openSafetyHandoff({ flow: "leave", action: "transfer", position, outgoing: row.staff_id, next: target }) }) },
       { label: "结束当前顶岗", action: () => openSafetyHandoff({ flow: "leave", action: "end_cover", position, outgoing: row.staff_id }) },
@@ -648,8 +653,8 @@ export function createActions(api) {
     renderSheet({ title: `选择 ${position.name} 接岗人`, description: "正在核对今日人员和可安排岗位…" });
     let candidates;
     try { candidates = await rpc("rpc_position_candidates", { p_session_token: token(), p_position_id: position.position_id }); }
-    catch (error) { setSheetError(explain(error)); return; }
-    const options = (candidates || []).filter(item => item.staff_id !== outgoing).map(item => `<option value="${e(item.staff_id)}" ${item.eligible ? "" : "disabled"}>${e(item.name)} · ${e(item.staff_id)}${item.eligible ? "" : `（${e(item.ineligible_reason || "暂不可选")}）`}</option>`).join("");
+    catch (error) { setSheetError(explain(error), error); return; }
+    const options = (candidates || []).filter(item => item.staff_id !== outgoing).map(item => `<option value="${e(item.staff_id)}" ${item.eligible ? "" : "disabled"}>${e(item.name)} · ${e(item.staff_id)}${item.eligible ? "" : `（${e(businessError(item.ineligible_reason || "暂不可选"))}）`}</option>`).join("");
     renderSheet({ title: `发起 ${position.name} 交接`, description: flow === "gap" ? "空岗补位仍需接岗人出发、到位及管理人员最终确认。" : "发起后原占岗人仍在岗位；接岗人出发时才从来源区域扣除。", body: `<label class="sheet-field">接岗人<select name="incoming"><option value="">请选择合格接岗人</option>${options}</select></label>`, buttons: [
       { label: "返回", action: closeSheet },
       { label: "发起交接", primary: true, action: () => {
@@ -667,12 +672,12 @@ export function createActions(api) {
     }
   }
   function nextHandoff(row) {
-    const names = { begin_trip: "开始前往", confirm_arrival: "我已到位", finalize: "确认交接完成" };
+    const names = nextActionNames;
     const rpcNames = { begin_trip: "rpc_live_begin_handoff_trip", confirm_arrival: "rpc_live_confirm_handoff_arrival", finalize: "rpc_live_finalize_handoff" };
     const action = row.next_action || (row.stage === "awaiting_incoming" ? "begin_trip" : row.stage === "in_transit" ? "confirm_arrival" : "finalize");
     const rpcName = rpcNames[action];
     if (!rpcName) { notice("该交接的下一步状态暂不可识别，请刷新。", true); return; }
-    confirm(names[action], `${row.position_name}：${row.stage_display || "请核对现场阶段"}。只允许真正负责此步的员工本人操作。`, names[action], () => callWrite(rpcName, { p_handoff_id: row.handoff_id }, `${row.position_name}交接进度已更新。`, { onError: error => {
+    confirm(names[action], `${row.position_name}：${handoffStage(row)}。只允许真正负责此步的员工本人操作。`, names[action], () => callWrite(rpcName, { p_handoff_id: row.handoff_id }, `${row.position_name}交接进度已更新。`, { onError: error => {
       if (action === "begin_trip" && row.requested_action === "short_leave" && /来源区域低于最低人数/.test(String(error.message || ""))) {
         setSheetError("接岗人离开当前位置会造成新的区域最低人数缺口。请管理人员在交接页批准并填写原因，再由接岗人本人重新点击开始前往。 ");
         return true;
@@ -686,7 +691,7 @@ export function createActions(api) {
     if (row.flow === "leave" && row.requested_action === "short_leave" && !row.short_leave_override_approved) actions.push({ label: "批准短离覆盖例外", action: () => openShortLeaveApproval(row) });
     actions.push({ label: "取消未完成交接", danger: true, action: () => openCancelHandoff(row) });
     actions.push({ label: "关闭", action: closeSheet });
-    renderSheet({ title: `${row.position_name} · 交接待办`, description: `${row.stage_display || "交接进行中"}。${row.can_current_actor_act_next ? "当前登录人可执行下一步。" : "下一步需要对应员工本人处理。"}`, buttons: actions });
+    renderSheet({ title: `${row.position_name} · 交接待办`, description: `${handoffStage(row)}。${row.can_current_actor_act_next ? "当前登录人可执行下一步。" : "下一步需要对应员工本人处理。"}`, buttons: actions });
   }
   function openShortLeaveApproval(row) {
     renderSheet({ title: "批准安全岗短离覆盖例外", description: "仅用于真实短离。吃饭不能使用此批准越过最低覆盖。批准后接岗人仍须本人点击开始前往。", body: textarea("批准原因", "reason", "例如：原岗员工突发身体不适"), buttons: [
@@ -718,8 +723,14 @@ export function createActions(api) {
     const hero = content.querySelector(".my-hero");
     if (hero) {
       const buttons = document.createElement("div"); buttons.className = "card-actions";
-      if (row.phase === "monitoring" && row.status === "on_duty" && row.current_assignment_type === "position" && row.current_position_id) buttons.append(actionButton("申请安全岗交接", () => openMySafetyLeave(row)));
-      if (row.phase === "monitoring" && ["meal", "short_leave"].includes(row.status) && row.return_assignment_type === "position" && row.return_position_id) buttons.append(actionButton("申请安全返岗交接", () => openMySafetyReturn(row)));
+      if (row.phase === "monitoring" && row.status === "on_duty" && row.current_assignment_type === "position" && safetyPositionIds.has(row.current_position_id)) {
+        buttons.append(actionButton("申请安全岗交接", () => openMySafetyLeave(row)));
+        for (const name of ["调岗", "吃饭", "短离", "下班"]) {
+          const button = actionButton(name, safetyExplanation); button.classList.add("explain-button"); buttons.append(button);
+        }
+        const hint = document.createElement("p"); hint.className = "safety-guidance"; hint.textContent = "当前值守安全关键岗，请先完成岗位交接"; hero.append(hint);
+      }
+      if (row.phase === "monitoring" && ["meal", "short_leave"].includes(row.status) && row.return_assignment_type === "position" && safetyPositionIds.has(row.return_position_id)) buttons.append(actionButton("申请安全返岗交接", () => openMySafetyReturn(row)));
       buttons.append(actionButton("修改我的 PIN", openMyPinChange));
       hero.append(buttons);
     }
@@ -744,7 +755,7 @@ export function createActions(api) {
     const loadingSheet = sheet;
     let target;
     try { target = await rpc("rpc_my_return_position", { p_session_token: token() }); }
-    catch (error) { if (sheet === loadingSheet) setSheetError(explain(error)); return; }
+    catch (error) { if (sheet === loadingSheet) setSheetError(explain(error), error); return; }
     if (sheet !== loadingSheet) return;
     if (!target || target.position_id !== row.return_position_id || !target.is_safety_critical) {
       setSheetError("返岗目标已变化，请刷新“我的”页面后重试。"); return;
@@ -755,7 +766,7 @@ export function createActions(api) {
     if (target.pending_handoff_id) {
       setSheetError("该岗位已有未完成交接，请先处理现有交接。"); return;
     }
-    const positionName = target.position_name || target.position_id;
+    const positionName = target.position_name || positionLabel(target.position_id);
     const outgoing = target.current_staff_id;
     if (!outgoing && row.status !== "short_leave") {
       renderSheet({ title: `${positionName} · 返岗`, body: `<p class="sheet-hint">该岗位当前为空岗。现有空岗返岗特殊流程只适用于真实短离；请管理人员先核对饭休与顶岗关系，不能伪造交接人。</p>`, buttons: [{ label: "关闭", action: closeSheet }] });
@@ -780,5 +791,31 @@ export function createActions(api) {
       ] });
   }
 
-  return { decorate, dismiss };
+  function safetyExplanation() {
+    renderSheet({ title: "请先完成安全岗交接", description: "当前值守安全关键岗，请先完成岗位交接。吃饭、短离、调岗和正常下班都不能直接释放该岗位；请使用“发起安全岗交接”。", buttons: [{ label: "知道了", action: closeSheet }] });
+  }
+  function sourceRisk(row, positions) {
+    const source = row.current_assignment_type === "position" ? positions.find(item => item.position_id === row.current_position_id)?.area_code : row.current_area_code;
+    const rule = (currentData?.rpc_today_coverage || []).find(item => item.scope_code === source);
+    return rule && Number(rule.current_count)-1 < Number(rule.minimum_coverage) ? `<p class="source-risk">${e(row.name)}当前在${e(areaLabel(source))}。调离后该区域将低于最低人数，请先安排其他人员补位。数据库会核对最新人数。</p>` : "";
+  }
+  async function openPosition(id) {
+    const rows = await loadPositions().catch(error => { notice(explain(error),true); return []; });
+    const row = rows.find(item => item.position_id === id);
+    if (!row) { notice("岗位信息尚未读取成功，请刷新。",true); return; }
+    if (phase() === "monitoring") openPositionActions(row);
+    else renderSheet({ title: row.name, description: "当前未在营业监控阶段，岗位历史仅供查看。", buttons:[{label:"关闭",action:closeSheet}] });
+  }
+  function openStaff(id) {
+    const row = staffById(id);
+    if (!row) { notice("员工信息尚未读取成功，请刷新。",true); return; }
+    if (["not_started","monitoring"].includes(phase()) && row.status !== "off_duty") openStaffActions(row);
+    else openStaffDetail(id,"today",row);
+  }
+  function dispatchStaff(id) {
+    const row = staffById(id);
+    if (row && phase() === "monitoring") openAssignment("transfer",row,false);
+    else notice("尚未开始营业或已结束，不能发起现场调度。",true);
+  }
+  return { decorate, dismiss, openPosition, openStaff, dispatchStaff };
 }
