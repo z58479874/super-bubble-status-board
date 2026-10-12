@@ -58,6 +58,12 @@
 .staff-detail-grid>div{border:1px solid #eef0f0;border-radius:9px;padding:9px;min-width:0}
 .staff-detail-grid dt{color:#7c8a91;font-size:11px}
 .staff-detail-grid dd{margin:4px 0 0;color:#2c3c46;font-size:14px;font-weight:800;overflow-wrap:anywhere}
+.hr-check{display:flex;align-items:center;gap:12px;min-height:48px;margin:8px 0;padding:10px;border:1px solid #e1e7e3;border-radius:10px;line-height:1.5;cursor:pointer;overflow-wrap:anywhere}
+.hr-check input{width:23px;height:23px;flex:0 0 23px;accent-color:#28764e}
+.hr-create{width:100%;min-height:48px;margin-bottom:8px}
+.hr-position-group h3{font-size:15px;margin:20px 0 8px;color:#315d47}
+.hr-readonly{font-size:13px;line-height:1.6;color:#6f7c84;margin:10px;overflow-wrap:anywhere}
+.sheet-field input,.sheet-field select,.sheet-field textarea{min-width:0;max-width:100%}
 .action-notice{position:fixed;z-index:60;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);width:min(calc(100% - 28px),480px);background:#315d47;color:#fff;padding:12px 15px;border-radius:11px;box-shadow:0 8px 25px #13291d33;font-size:13px;font-weight:800;line-height:1.5}
 .action-notice.error{background:#a94642}
 @media(min-width:700px){.sheet-backdrop{align-items:center;padding:20px}.sheet-panel{border-radius:18px;max-height:min(88vh,800px)}.directory-view .sheet-panel{width:min(100%,650px);height:min(88vh,800px);max-height:min(88vh,800px);border-radius:18px}}

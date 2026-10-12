@@ -1,4 +1,5 @@
 import { roleNames, employmentNames, modeNames, stateNames, label as displayLabel, areaLabel, positionLabel, statusLabel, handoffStage, nextActionNames, businessError, debugError, safetyPositionIds } from "./displayLabels.js";
+import { createStaffManagement } from './staff-management.js';
 // 013: 手机写操作仅使用既有 public RPC；规则和权限仍由数据库决定。
 export function createActions(api) {
   const { rpc, writeRpc, getSession, getPage, navigatePage, getSharedData, refreshAfterWrite, saveSession, requireLogin, areaNames, escapeHtml, datetime } = api;
@@ -15,6 +16,9 @@ export function createActions(api) {
   const $ = (selector, root = sheet) => root?.querySelector(selector);
   const isManager = () => managerRoles.has(getSession()?.role);
   const token = () => getSession()?.session_token;
+  const staffManagement = createStaffManagement({ rpc, getSession, renderSheet, getSheet: () => sheet,
+    closeSheet, callWrite, setSheetError, openResetPin, requireLogin, escapeHtml,
+    invalidateDirectory: () => { directoryRows = null; } });
   const overview = () => getPage() === 'my' ? currentData?.rpc_my_today_state || {} : currentData?.rpc_today_overview || {};
   const phase = () => overview().phase || "not_prepared";
   const staffRows = () => currentData?.rpc_today_staff || [];
@@ -44,6 +48,7 @@ export function createActions(api) {
     document.body.classList.remove("sheet-open");
   }
   function dismiss() {
+    staffManagement.reset();
     working = false;
     if (sheet) { sheet.remove(); sheet = null; }
     tempDraft = null;
@@ -235,39 +240,9 @@ export function createActions(api) {
     directoryReadAt = Date.now();
     return rows;
   }
-  async function openDirectory() {
-    if (getSession()?.role !== "manager") return;
-    renderSheet({ title: "员工管理", description: "正在读取长期员工名册…", fullScreen: true });
-    const loadingSheet = sheet;
-    try {
-      const rows = await loadDirectory();
-      if (sheet !== loadingSheet) return;
-      renderSheet({ title: "员工管理", description: `全部员工 ${rows.length} 人 · 与今日排班和营业状态无关`, fullScreen: true,
-        body: `<label class="sheet-field">搜索姓名或员工编号<input name="staffSearch" type="search" autocomplete="off" placeholder="输入姓名或员工编号"></label><div class="directory-list" data-directory-list></div>`,
-        buttons: [{ label: "关闭员工管理", action: closeSheet }],
-        onOpen: () => {
-          const search = $("[name=staffSearch]");
-          const list = $("[data-directory-list]");
-          const update = () => {
-            const query = search.value.trim().toLocaleLowerCase();
-            const shown = rows.filter(row => `${row.name} ${row.id}`.toLocaleLowerCase().includes(query));
-            list.innerHTML = shown.length ? shown.map(row => `<button type="button" class="directory-entry" data-directory-id="${e(row.id)}"><span><strong>${e(row.name)}</strong><small>${e(row.id)} · ${e(row.department)} · ${e(displayLabel(roleNames,row.role))} · ${e(displayLabel(employmentNames,row.employment_type))}</small></span><span class="pill ${row.active ? "green" : "gray"}">${row.active ? "启用" : "停用"}</span></button>`).join("") : `<p class="sheet-hint">没有匹配的员工。</p>`;
-          };
-          search.addEventListener("input", update);
-          list.addEventListener("click", event => {
-            const button = event.target.closest("[data-directory-id]");
-            if (button) openStaffDetail(button.dataset.directoryId, "directory");
-          });
-          update();
-        } });
-    } catch (error) {
-      if (sheet !== loadingSheet) return;
-      renderSheet({ title: "员工管理", description: "员工名册暂时无法读取。", fullScreen: true,
-        body: `<p class="sheet-hint">${e(explain(error))}</p>`,
-        buttons: [{ label: "重试", primary: true, action: () => { directoryRows = null; openDirectory(); } }, { label: "关闭", action: closeSheet }] });
-    }
-  }
+  function openDirectory() { return staffManagement.openDirectory(); }
   async function openStaffDetail(staffId, source = "today", fallback = null) {
+    if (getSession()?.role === 'manager') return staffManagement.openDetail(staffId);
     if (!isManager()) return;
     renderSheet({ title: "员工详情", description: "正在核对长期员工档案…" });
     const loadingSheet = sheet;
@@ -411,8 +386,11 @@ export function createActions(api) {
     const rows = candidates.map(item => `<div class="candidate-card"><strong>${e(item.staff_name)} · ${e(item.staff_id)}</strong><small>${e(displayLabel(employmentNames,item.employment_type))} · ${item.active ? "活跃" : "已停用"} · 最近排班 ${e(item.last_roster_day || "无")}</small></div>`).join("");
     const eligible = candidates.filter(item => item.employment_type === "temporary_part_time");
     renderSheet({ title: "确认是否复用历史人员", description: `${draft.name} · 请人工核对同名者；姓名不能作为唯一身份。`, body: rows || `<p class="sheet-hint">未查到完全同名档案。请确认是新人员后创建。</p>`, buttons: [
-      ...eligible.map(item => ({ label: `复用 ${item.staff_id}${item.active ? "" : "（重新启用）"}`, action: () => {
-        if (!item.active) confirm("重新启用历史人员", "此人员已停用，是否重新启用？原有可安排岗位关系会保留。", "确认重新启用并加入今日", () => reuseTemp(item, true));
+      ...eligible.map(item => ({ label: `复用 ${item.staff_id}${item.active ? "" : "（须先由店长恢复）"}`, action: () => {
+        if (!item.active) {
+          if (getSession()?.role === 'manager') staffManagement.openDetail(item.staff_id);
+          else setSheetError('该人员已停用，请先由店长在员工管理中恢复档案，再加入今日名单。');
+        }
         else confirm("复用历史人员", `请核对 ${item.staff_name}（${item.staff_id}）确为同一真人。`, "复用并加入今日", () => reuseTemp(item, false));
       } })),
       { label: "确认是新人，创建新编号", primary: true, action: () => confirm("确认创建新人员", `将为 ${draft.name} 创建独立 TMP 编号并加入今日名单。`, "确认创建", createTemp) },
