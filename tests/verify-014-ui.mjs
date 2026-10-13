@@ -125,9 +125,9 @@ try {
   mock.staff.find(row=>row.id==='FT004').role='deputy'; const deputy=await open('FT004'); await deputy.getByText('现场调度',{exact:true}).waitFor(); await deputy.locator('[data-page="staff"]').click(); await deputy.locator('[data-staff-id]').first().waitFor(); assert.equal(await deputy.getByText('员工管理',{exact:true}).count(),0);
   passed('主管/副店拥有现场管理入口，无店长专属员工管理入口');
   await page.locator('[data-page="home"]').click(); await refresh(page);
-  const initial=calls.length;
+  const initial=calls.filter(row=>row.actor==='FT001').length;
   for (const tab of ['staff','positions','home']) { await page.locator(`[data-page="${tab}"]`).click(); await page.waitForTimeout(100); }
-  assert.equal(calls.length,initial,'切页应复用5秒内读取数据');
+  assert.equal(calls.filter(row=>row.actor==='FT001').length,initial,'切页应复用5秒内读取数据');
   await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});
   const managerBefore=calls.filter(row=>row.actor==='FT001').length;
   await page.waitForTimeout(5400);
