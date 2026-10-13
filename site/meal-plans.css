@@ -8,6 +8,8 @@
 .baseline-not-ready{color:#755423;background:#fff8ed}.meal-unplanned{display:grid;gap:8px;padding-top:12px}
 .meal-check{display:flex;align-items:center;gap:12px;min-height:48px}.meal-check input{width:24px;height:24px;flex-shrink:0}
 .meal-highlight{outline:3px solid #df8b24} .meal-card .card-actions{display:grid;grid-template-columns:1fr 1fr}
+.meal-edit-state,.meal-background-update{border-radius:10px;padding:9px 11px;margin:0 0 10px;line-height:1.5;font-size:12px}
+.meal-edit-state{background:#f2f6f7;color:#536873}.meal-background-update{background:#fff2d9;border:1px solid #e9c787;color:#805719;font-weight:750}
 [data-meal-preview] .primary-button{width:100%;margin-top:12px}
 .sheet-field[hidden]{display:none!important} .section>summary{min-height:48px;cursor:pointer;font-weight:650;line-height:1.8}
 @media(max-width:430px){.meal-card .card-actions{grid-template-columns:1fr}.meal-forecast-row .pill{white-space:normal}.meal-timeline{padding-left:9px}}

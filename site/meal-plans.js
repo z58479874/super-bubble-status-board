@@ -66,6 +66,23 @@ export function createMealActions(api) {
   const token=()=>getSession()?.session_token;
   const canManage=()=>managers.has(getSession()?.role);
   let generation=0;
+  let editing=null;
+  const editingNotice='<p class="meal-edit-state">编辑中，自动刷新已暂停</p><p class="meal-background-update" data-meal-refresh-note hidden></p>';
+  function mealSignature(d,id) {
+    const plan=(d?.plans||[]).find(p=>p.staff_id===id);
+    return JSON.stringify({revision:plan?.revision??0,status:plan?.status??null,
+      phase:d?.phase??null,analysis:d?.analysis?.preview_revision??null});
+  }
+  function beginEditing(id,kind) { editing={staffId:id,kind,signature:null}; }
+  function markEditingBaseline(d,id) { if(editing?.staffId===id) editing.signature=mealSignature(d,id); }
+  function isEditing(page) { return page==='meals'&&editing!==null; }
+  function onSheetClosed() { const wasEditing=editing!==null; if(wasEditing) generation++; editing=null; return wasEditing; }
+  function handleBackgroundRefresh(page,data,error) {
+    if(!isEditing(page)||error||!data?.rpc_today_meal_plan||editing.signature===null)return;
+    if(mealSignature(data.rpc_today_meal_plan,editing.staffId)===editing.signature)return;
+    const note=getSheet()?.querySelector('[data-meal-refresh-note]');
+    if(note){note.hidden=false;note.textContent='现场或计划数据已有更新，保存前请重新预览。';}
+  }
   function error(err) {setSheetError(/^[\s\S]*[\u4e00-\u9fff]/.test(err?.message||'') && !/SQLSTATE|public\.|app_private\.|\brpc_/.test(err.message)?err.message:businessError(err),getSession()?.role==='manager'?err:null);}
   async function fresh() {return rpc('rpc_today_meal_plan',{p_session_token:token()});}
   function conflict(err,id) {
@@ -75,6 +92,7 @@ export function createMealActions(api) {
   }
   async function openEditor(id) {
     if(!canManage()) return;
+    beginEditing(id,'edit');
     const gen=++generation;
     renderSheet({title:'安排午餐',description:'正在读取最新计划与今日人员…'});
     const loading=getSheet();
@@ -82,6 +100,7 @@ export function createMealActions(api) {
     try {[d,staff,positions]=await Promise.all([fresh(),rpc('rpc_today_staff',{p_session_token:token()}),rpc('rpc_today_positions',{p_session_token:token()})]);}
     catch(err){if(getSheet()===loading)error(err);return;}
     if(gen!==generation||getSheet()!==loading) return;
+    markEditingBaseline(d,id);
     if(!['not_started','monitoring'].includes(d.phase)) {setSheetError('请先准备营业日；结束营业后不能修改轮餐计划。');return;}
     const old=(d.plans||[]).find(p=>p.staff_id===id), person=staff.find(s=>s.staff_id===id);
     if(!person || person.roster_status!=='scheduled'||person.active===false) {setSheetError('该人员当前没有有效排班，不能安排轮餐。');return;}
@@ -89,7 +108,7 @@ export function createMealActions(api) {
     const defaultTime=`${d.business_day}T12:00`;
     const fixed=positions.filter(p=>!p.is_mobile&&p.active!==false);
     const opts=(arr,value)=>arr.map(([v,t])=>`<option value="${e(v)}" ${value===v?'selected':''}>${e(t)}</option>`).join('');
-    renderSheet({title:old?.status==='planned'?'修改午餐计划':'安排午餐',description:`${person.name} · ${id}`,body:`<p>今日排班：${e(mealTime(person.scheduled_start_time))}–${e(mealTime(person.scheduled_end_time))}（北京时间）</p><label class="sheet-field">计划午餐时间（北京时间）<input type="datetime-local" name="mealStart" value="${e(localTime(old?.planned_start_time)||defaultTime)}"></label><p>时长：45分钟</p><label class="sheet-field">计划位置<select name="mealAssignment">${opts([['unspecified','暂未确定'],['position','固定岗位'],['area_standby','区域'],['mobile_pool','机动']],old?.planned_assignment_type||'unspecified')}</select></label><label class="sheet-field" data-meal-position>固定岗位<select name="mealPosition"><option value="">请选择岗位</option>${opts(fixed.map(p=>[p.position_id,p.name]),old?.planned_position_id)}</select></label><label class="sheet-field" data-meal-area>区域<select name="mealArea"><option value="">请选择区域</option>${opts(Object.entries(areaNames).filter(([code])=>code!=='global'),old?.planned_area_code)}</select></label><label class="sheet-field">覆盖方式<select name="mealCover">${opts(Object.entries(coverNames),old?.coverage_mode||'no_fixed_cover')}</select></label><label class="sheet-field" data-meal-cover>接岗人<select name="mealIncoming"></select></label><p class="muted" data-meal-candidate-note></p><label class="sheet-field">备注<textarea name="mealNote" maxlength="500">${e(old?.note||'')}</textarea></label><p class="meal-hint">预览不会开始吃饭，也不会让接岗人出发。</p><div data-meal-preview></div>`,buttons:[{label:'预览安排',primary:true,action:()=>preview()}]});
+    renderSheet({title:old?.status==='planned'?'修改午餐计划':'安排午餐',description:`${person.name} · ${id}`,body:`${editingNotice}<p>今日排班：${e(mealTime(person.scheduled_start_time))}–${e(mealTime(person.scheduled_end_time))}（北京时间）</p><label class="sheet-field">计划午餐时间（北京时间）<input type="datetime-local" name="mealStart" value="${e(localTime(old?.planned_start_time)||defaultTime)}"></label><p>时长：45分钟</p><label class="sheet-field">计划位置<select name="mealAssignment">${opts([['unspecified','暂未确定'],['position','固定岗位'],['area_standby','区域'],['mobile_pool','机动']],old?.planned_assignment_type||'unspecified')}</select></label><label class="sheet-field" data-meal-position>固定岗位<select name="mealPosition"><option value="">请选择岗位</option>${opts(fixed.map(p=>[p.position_id,p.name]),old?.planned_position_id)}</select></label><label class="sheet-field" data-meal-area>区域<select name="mealArea"><option value="">请选择区域</option>${opts(Object.entries(areaNames).filter(([code])=>code!=='global'),old?.planned_area_code)}</select></label><label class="sheet-field">覆盖方式<select name="mealCover">${opts(Object.entries(coverNames),old?.coverage_mode||'no_fixed_cover')}</select></label><label class="sheet-field" data-meal-cover>接岗人<select name="mealIncoming"></select></label><p class="muted" data-meal-candidate-note></p><label class="sheet-field">备注<textarea name="mealNote" maxlength="500">${e(old?.note||'')}</textarea></label><p class="meal-hint">预览不会开始吃饭，也不会让接岗人出发。</p><div data-meal-preview></div>`,buttons:[{label:'预览安排',primary:true,action:()=>preview()}]});
     const sheet=getSheet(), $=s=>sheet.querySelector(s), val=n=>$(`[name=${n}]`).value;
     let candidateBusy=false, candidateError=false, requestId=0, previewBusy=false;
     const invalidate=()=>{$('[data-meal-preview]').innerHTML='';};
@@ -149,7 +168,7 @@ export function createMealActions(api) {
           if(JSON.stringify(current)!==JSON.stringify(params)){invalidate();setSheetError('填写内容已变化，请重新预览。');return;}
           const reason=$('[name=mealRiskReason]')?.value.trim()||null, confirmed=$('[name=mealRiskConfirm]')?.checked===true;
           if(risky&&(!confirmed||!reason)){setSheetError('请填写风险确认原因，并明确勾选确认。');return;}
-          await callWrite('rpc_meal_plan_upsert',{...params,p_preview_revision:p.preview_revision,p_confirm_risk:risky&&confirmed,p_risk_reason:risky?reason:null},'轮餐计划已保存；现场状态没有改变。',{onError:err=>{if(!conflict(err,id))error(err);return true;}});
+          await callWrite('rpc_meal_plan_upsert',{...params,p_preview_revision:p.preview_revision,p_confirm_risk:risky&&confirmed,p_risk_reason:risky?reason:null},'轮餐计划已保存；现场状态没有改变。',{closeBeforeRefresh:true,onError:err=>{if(!conflict(err,id))error(err);return true;}});
         });
       } catch(err){if(getSheet()===sheet&&!conflict(err,id))error(err);}
       finally{previewBusy=false;btn.disabled=false;}
@@ -157,12 +176,14 @@ export function createMealActions(api) {
   }
   async function cancel(id) {
     if(!canManage())return;
+    beginEditing(id,'cancel');
     renderSheet({title:'取消轮餐计划',description:'正在核对当前版本…'});const loading=getSheet();
     let d;try{d=await fresh();}catch(err){if(getSheet()===loading)error(err);return;}
     if(getSheet()!==loading)return;
+    markEditingBaseline(d,id);
     const p=(d.plans||[]).find(p=>p.staff_id===id);
     if(!p||p.status==='cancelled'||!['not_started','monitoring'].includes(d.phase)){setSheetError('计划状态已变化，请刷新计划。');return;}
-    renderSheet({title:'确认取消轮餐计划',description:`${p.staff_name} · ${mealTime(p.planned_start_time)}。取消后仍保留历史记录。`,body:'<label class="sheet-field">取消原因<textarea name="mealCancelReason" maxlength="500"></textarea></label>',buttons:[{label:'保留计划',action:closeSheet},{label:'确认取消',danger:true,action:()=>{const reason=getSheet()?.querySelector('[name=mealCancelReason]')?.value.trim();if(!reason){setSheetError('请填写取消原因。');return;}callWrite('rpc_meal_plan_cancel',{p_staff_id:id,p_expected_revision:p.revision,p_reason:reason},'计划已取消，记录保留在历史中。',{onError:err=>{if(!conflict(err,id))error(err);return true;}});}}]});
+    renderSheet({title:'确认取消轮餐计划',description:`${p.staff_name} · ${mealTime(p.planned_start_time)}。取消后仍保留历史记录。`,body:`${editingNotice}<label class="sheet-field">取消原因<textarea name="mealCancelReason" maxlength="500"></textarea></label>`,buttons:[{label:'保留计划',action:closeSheet},{label:'确认取消',danger:true,action:()=>{const reason=getSheet()?.querySelector('[name=mealCancelReason]')?.value.trim();if(!reason){setSheetError('请填写取消原因。');return;}callWrite('rpc_meal_plan_cancel',{p_staff_id:id,p_expected_revision:p.revision,p_reason:reason},'计划已取消，记录保留在历史中。',{closeBeforeRefresh:true,onError:err=>{if(!conflict(err,id))error(err);return true;}});}}]});
   }
   function decorate(page,data,content) {
     if(canManage()&&page==='staff') {
@@ -179,5 +200,5 @@ export function createMealActions(api) {
     content.querySelector('[data-meal-real-tasks]')?.addEventListener('click',()=>content.querySelector('[data-my-handoff-id]')?.scrollIntoView({block:'center'}));
     content.querySelector('[data-meal-real-staff]')?.addEventListener('click',()=>{if(canManage()) {navigatePage('staff');}});
   }
-  return {decorate};
+  return {decorate,isEditing,handleBackgroundRefresh,onSheetClosed};
 }

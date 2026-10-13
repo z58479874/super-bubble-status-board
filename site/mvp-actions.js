@@ -44,14 +44,19 @@ export function createActions(api) {
     clearTimeout(noticeTimer);
     noticeTimer = setTimeout(() => { bar.hidden = true; }, 8000);
   }
-  function closeSheet() {
+  function closeSheet(refreshMeal = true) {
     if (working || !sheet) return;
     sheet.remove(); sheet = null;
     tempDraft = null;
     document.body.classList.remove("sheet-open");
+    const resumeMealRefresh = mealActions?.onSheetClosed?.() === true;
+    if (resumeMealRefresh && refreshMeal) {
+      void refreshAfterWrite().catch(() => notice("最新轮餐数据读取失败，请点击刷新重试。", true));
+    }
   }
   function dismiss() {
     staffManagement.reset();
+    mealActions?.onSheetClosed?.();
     working = false;
     if (sheet) { sheet.remove(); sheet = null; }
     tempDraft = null;
@@ -125,11 +130,16 @@ export function createActions(api) {
       const result = await writeRpc(name, { p_session_token: token(), ...params });
       directoryRows = null;
       if (result && typeof result === "object" && result.ok === false) throw new Error(result.message || "操作未完成");
+      if (!options.keepSheet && options.closeBeforeRefresh) {
+        working = false;
+        closeSheet(false);
+        working = true;
+      }
       let refreshOk = true;
       try { await refreshAfterWrite(); }
       catch { refreshOk = false; }
       working = false;
-      if (!options.keepSheet) closeSheet();
+      if (!options.keepSheet && !options.closeBeforeRefresh) closeSheet();
       working = true;
       if (refreshOk && success) notice(success);
       if (!refreshOk) notice("操作已提交，但最新现场数据读取失败。请点击刷新核对，不要重复提交。", true);
@@ -799,5 +809,7 @@ export function createActions(api) {
     if (row && phase() === "monitoring") openAssignment("transfer",row,false);
     else notice("尚未开始营业或已结束，不能发起现场调度。",true);
   }
-  return { decorate, dismiss, openPosition, openStaff, dispatchStaff };
+  return { decorate, dismiss, openPosition, openStaff, dispatchStaff,
+    isAutoRefreshPaused: page => mealActions.isEditing(page),
+    handleBackgroundRefresh: (page, data, error) => mealActions.handleBackgroundRefresh(page, data, error) };
 }

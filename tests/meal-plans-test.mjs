@@ -58,7 +58,7 @@ async function open(id='FT001'){
     if(name==='rpc_meal_plan_upsert'||name==='rpc_meal_plan_cancel'){
      if(reject){const e=reject;reject=null;throw e;}
      const old=data.plans.find(p=>p.staff_id===b.p_staff_id);
-     assert.equal(b.p_expected_revision,old?.revision??0);
+     if(b.p_expected_revision!==(old?.revision??0))throw Object.assign(Error('轮餐计划已被其他管理人员调整，请刷新后重新确认'),{code:'40001'});
      if(name==='rpc_meal_plan_cancel'){old.status='cancelled';old.display_state='cancelled';old.cancel_reason=b.p_reason;old.cancelled_at=now;old.revision++;}
      else {assert.equal(b.p_preview_revision,preview.preview_revision);const row=plan({staff_id:b.p_staff_id,planned_start_time:b.p_planned_start_time,planned_assignment_type:b.p_planned_assignment_type,planned_position_id:b.p_planned_position_id,coverage_mode:b.p_coverage_mode,revision:(old?.revision??0)+1});data.plans=data.plans.filter(p=>p.staff_id!==b.p_staff_id).concat(row);}
      result=null;
@@ -108,6 +108,23 @@ try{
  mock.states.get('FT002').status='on_duty';mock.setAssignment('FT002','position','plum',null);myPlan=plan({next_action:'self_request_safety_meal_handoff',next_action_label:'发起午餐交接'});await refresh(staff);await staff.locator('[data-meal-real-handoff]').click();await dialog(staff).getByRole('heading',{name:'申请安全岗交接'}).waitFor();assert.equal(await f(staff,'handoffAction').inputValue(),'meal');pass('本人安全午餐复用现有安全交接弹层');
  await close(staff);myPlan=plan({next_action:'ask_manager_start_meal',next_action_label:'请管理人员确认实际离岗并开始吃饭'});await refresh(staff);assert.equal(await staff.locator('[data-meal-real-handoff],[data-meal-real-staff]').count(),0);pass('普通岗位staff不得直接开始meal');
  const before=calls.length;myPlan=plan({display_state:'due_unverified',time_until_start_seconds:-5});await refresh(staff);await staff.waitForTimeout(5200);assert.ok(calls.slice(before).filter(c=>c.name==='rpc_my_meal_plan').length>=2);assert.equal(calls.slice(before).filter(c=>/rpc_live_/.test(c.name)).length,0);pass('5秒轮询更新饭点，不触发真实meal/出发/暂停');
+ data=day({phase:'monitoring',plans:[plan({revision:8,planned_start_time:'2026-10-13T03:30:00Z'})]});
+ mock.phase='monitoring';
+ preview=analysis({baseline_status:'ready',requires_risk_confirmation:true,preview_revision:'concurrent-preview',forecast:[{scope_code:'high_altitude',level:'below_minimum',current_count:7,projected_count:6,minimum_coverage:7,target_coverage:9}]});
+ const phoneA=await open('FT001'),phoneB=await open('FT003');
+ await enter(phoneA);await enter(phoneB);await edit(phoneA);await edit(phoneB);
+ await f(phoneB,'mealStart').fill('2026-10-13T12:30');await f(phoneB,'mealNote').fill('手机B保留的备注');await previewClick(phoneB);await f(phoneB,'mealRiskReason').fill('手机B填写的人数风险原因');await f(phoneB,'mealRiskConfirm').check();
+ await f(phoneA,'mealStart').fill('2026-10-13T12:00');await previewClick(phoneA);await f(phoneA,'mealRiskReason').fill('手机A已复核');await f(phoneA,'mealRiskConfirm').check();await dialog(phoneA).locator('[data-meal-save]').click();await dialog(phoneA).waitFor({state:'hidden'});
+ await phoneB.bringToFront();
+ await dialog(phoneB).locator('[data-meal-refresh-note]').waitFor({state:'visible',timeout:20000});
+ const bReads=calls.filter(c=>c.name==='rpc_today_meal_plan'&&c.b.p_session_token==='FT003-token').length;
+ await phoneB.waitForTimeout(5500);
+ assert.equal(calls.filter(c=>c.name==='rpc_today_meal_plan'&&c.b.p_session_token==='FT003-token').length,bReads,'轮餐页连续读取间隔不应仍为5秒');
+ assert.equal(await f(phoneB,'mealStart').inputValue(),'2026-10-13T12:30');assert.equal(await f(phoneB,'mealNote').inputValue(),'手机B保留的备注');assert.equal(await f(phoneB,'mealRiskReason').inputValue(),'手机B填写的人数风险原因');assert.equal(await f(phoneB,'mealRiskConfirm').isChecked(),true);assert.match(await dialog(phoneB).innerText(),/编辑中，自动刷新已暂停/);assert.match(await dialog(phoneB).innerText(),/现场或计划数据已有更新/);await width(phoneB);pass('轮餐页15秒轮询，编辑期间后台读取但不重绘或覆盖表单');
+ const bWriteStart=calls.filter(c=>c.name==='rpc_meal_plan_upsert'&&c.b.p_session_token==='FT003-token').length;
+ await dialog(phoneB).locator('[data-meal-save]').click();await dialog(phoneB).getByRole('button',{name:'刷新计划',exact:true}).waitFor();assert.equal(calls.filter(c=>c.name==='rpc_meal_plan_upsert'&&c.b.p_session_token==='FT003-token').length,bWriteStart+1);assert.match(await dialog(phoneB).innerText(),/刚刚被其他管理人员修改/);
+ await dialog(phoneB).getByRole('button',{name:'刷新计划',exact:true}).click();await f(phoneB,'mealStart').waitFor();assert.equal(await f(phoneB,'mealStart').inputValue(),'2026-10-13T12:00');pass('双客户端旧revision被数据库拦截，刷新后读取另一手机的12:00');
+ const resumed=calls.filter(c=>c.name==='rpc_today_meal_plan'&&c.b.p_session_token==='FT003-token').length;await close(phoneB);await phoneB.waitForTimeout(300);assert.ok(calls.filter(c=>c.name==='rpc_today_meal_plan'&&c.b.p_session_token==='FT003-token').length>resumed);pass('关闭编辑弹窗后立即恢复并主动刷新');
  assert.equal(calls.filter(c=>c.b.p_actor_staff_id).length,0);assert.deepEqual(errors,[]);pass('所有请求只传会话身份，无未捕获JS异常');
  console.log(`014.2 total ${passed} checks passed (mock only)`);
 }finally{for(const c of contexts)await c.close();await browser.close();}

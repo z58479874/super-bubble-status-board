@@ -4,7 +4,8 @@ import { areaNames, roleNames, employmentNames, modeNames, phaseNames, stateName
 
 const config = window.__SB_CONFIG__ || {};
 const sessionKey = "super_bubble_012_session";
-const pollMs = 5000;
+const livePollMs = 5000;
+const mealPollMs = 15000;
 const managerRoles = new Set(["manager", "deputy", "supervisor"]);
 const views = {
   login: document.getElementById("loginView"),
@@ -28,6 +29,7 @@ let staffFilter = "all";
 let epoch = 0;
 let controller = null;
 let polling = null;
+let pollingGeneration = 0;
 let busy = false;
 let cache = {};
 let sharedReads = {};
@@ -179,10 +181,17 @@ function tickClock() {
 }
 function startPolling() {
   stopPolling();
-  polling = setInterval(() => { if (!document.hidden && !busy) refresh(false); }, pollMs);
+  const generation = ++pollingGeneration;
+  polling = setTimeout(async function poll() {
+    if (generation !== pollingGeneration) return;
+    if (!document.hidden && !busy) await refresh(false);
+    if (generation !== pollingGeneration) return;
+    polling = setTimeout(poll, page === "meals" ? mealPollMs : livePollMs);
+  }, page === "meals" ? mealPollMs : livePollMs);
 }
 function stopPolling() {
-  if (polling) clearInterval(polling);
+  pollingGeneration++;
+  if (polling) clearTimeout(polling);
   polling = null;
   if (controller) controller.abort();
   controller = null;
@@ -196,7 +205,7 @@ function selectPage(next) {
   epoch++;
   busy = false;
   page = next;
-  renderNav(); render(); refresh(false, true);
+  renderNav(); render(); startPolling(); refresh(false, true);
   window.scrollTo(0, 0);
 }
 async function refresh(force, reuseRecent = false) {
@@ -212,7 +221,7 @@ async function refresh(force, reuseRecent = false) {
   const calls = pageCalls[myPage];
   try {
     const values = await Promise.all(calls.map(async name => {
-      if (reuseRecent && sharedReads[name] && Date.now() - sharedReads[name].at < pollMs) return sharedReads[name].value;
+      if (reuseRecent && sharedReads[name] && Date.now() - sharedReads[name].at < livePollMs) return sharedReads[name].value;
       let value;
       try { value = await rpc(name, { p_session_token: session.session_token }, signal); }
       catch (error) {
@@ -220,11 +229,16 @@ async function refresh(force, reuseRecent = false) {
         // Plan read failure must not hide live safety gaps or actual handoffs.
         value = { load_error: true };
       }
-      if (myEpoch === epoch) sharedReads[name] = { value, at: Date.now() };
       return value;
     }));
     if (myEpoch !== epoch || myPage !== page) return;
-    cache[myPage] = Object.fromEntries(calls.map((name, index) => [name, values[index]]));
+    const freshData = Object.fromEntries(calls.map((name, index) => [name, values[index]]));
+    if (actions?.isAutoRefreshPaused?.(myPage) === true) {
+      actions?.handleBackgroundRefresh?.(myPage, freshData);
+      return !values.some(value => value?.load_error);
+    }
+    calls.forEach((name, index) => { sharedReads[name] = { value: values[index], at: Date.now() }; });
+    cache[myPage] = freshData;
     updatedAt[myPage] = new Date().toISOString();
     pageError[myPage] = "";
     render();
@@ -232,6 +246,10 @@ async function refresh(force, reuseRecent = false) {
   } catch (error) {
     if (myEpoch !== epoch || myPage !== page) return;
     if (isSessionError(error)) { showLogin("登录已失效，请重新输入个人 PIN。"); return; }
+    if (actions?.isAutoRefreshPaused?.(myPage) === true) {
+      actions?.handleBackgroundRefresh?.(myPage, null, error);
+      return false;
+    }
     pageError[myPage] = readableError(error);
     render();
     return false;
