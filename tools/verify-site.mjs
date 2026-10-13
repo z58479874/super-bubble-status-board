@@ -2,14 +2,14 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..', 'site');
-const files = ['index.html', 'mvp.js', 'mvp.css', 'mvp-actions.js', 'mvp-actions.css', 'displayLabels.js', 'staff-management.js', 'config.js', 'icon.svg', '.nojekyll'];
+const files = ['index.html', 'mvp.js', 'mvp.css', 'mvp-actions.js', 'mvp-actions.css', 'displayLabels.js', 'staff-management.js', 'meal-plans.js', 'meal-plans.css', 'config.js', 'icon.svg', '.nojekyll'];
 for (const name of files) {
   if (!existsSync(resolve(root, name))) throw new Error(`Missing site asset: ${name}`);
 }
 const html = readFileSync(resolve(root, 'index.html'), 'utf8');
 const app = readFileSync(resolve(root, 'mvp.js'), 'utf8');
 const config = readFileSync(resolve(root, 'config.js'), 'utf8');
-for (const name of ['mvp.js', 'mvp.css', 'mvp-actions.css', 'config.js', 'icon.svg']) {
+for (const name of ['mvp.js', 'mvp.css', 'mvp-actions.css', 'meal-plans.css', 'config.js', 'icon.svg']) {
   if (!html.includes(`./${name}`)) throw new Error(`Asset is not relative to Pages subpath: ${name}`);
 }
 if (!app.includes('import { createActions } from "./mvp-actions.js"')) {
@@ -28,7 +28,7 @@ if (/sb_secret_|service_role|postgres(?:ql)?:\/\/|SUPABASE_DB_PASSWORD/.test(all
 if (/\b(?:PIN|pin|token|session_token)\s*[:=]\s*['\"][^'\"]+['\"]/.test(all)) {
   throw new Error('Possible hardcoded PIN or session token detected.');
 }
-console.log('014.1 static site verified for Pages subpath.');
+console.log('014.2 static site verified for Pages subpath.');
 
 
 for (const name of ['mvp.js','mvp-actions.js']) {

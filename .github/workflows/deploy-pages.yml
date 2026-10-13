@@ -27,14 +27,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify release files
-        run: node tools/verify-site.mjs
+      - name: Install test dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Verify production release
+        run: npm run verify:release
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: dist
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4

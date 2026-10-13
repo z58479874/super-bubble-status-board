@@ -1,3 +1,4 @@
+import { renderMealPage, renderMyMeal, renderNextMeals, tickMealClocks } from './meal-plans.js';
 import { createActions } from "./mvp-actions.js";
 import { areaNames, roleNames, employmentNames, modeNames, phaseNames, stateNames, actionNames, nextActionNames, areaLabel, positionLabel, assignmentLabel, handoffStage, statusLabel, label, businessError, dispatchCandidates } from "./displayLabels.js";
 
@@ -14,11 +15,12 @@ const content = document.getElementById("content");
 const banner = document.getElementById("connectionBanner");
 const phaseBadge = document.getElementById("phaseBadge");
 const pageCalls = {
-  home: ["rpc_today_overview", "rpc_today_alerts", "rpc_today_coverage", "rpc_today_handoffs", "rpc_today_staff", "rpc_today_positions"],
+  home: ["rpc_today_meal_plan", "rpc_today_overview", "rpc_today_alerts", "rpc_today_coverage", "rpc_today_handoffs", "rpc_today_staff", "rpc_today_positions"],
   dispatch: ["rpc_today_overview", "rpc_today_alerts", "rpc_today_coverage", "rpc_today_handoffs", "rpc_today_staff", "rpc_today_positions"],
   staff: ["rpc_today_overview", "rpc_today_staff", "rpc_today_positions"],
   positions: ["rpc_today_overview", "rpc_today_positions"],
-  handoffs: ["rpc_today_overview", "rpc_today_handoffs"], my: ["rpc_my_today_state"]
+  handoffs: ["rpc_today_overview", "rpc_today_handoffs"], my: ["rpc_my_today_state", "rpc_my_meal_plan"],
+  meals: ["rpc_today_overview", "rpc_today_meal_plan"]
 };
 let session = null;
 let page = "home";
@@ -165,6 +167,7 @@ function renderNav() {
     `<button type="button" class="nav-button ${page === id ? "active" : ""}" data-page="${id}" aria-current="${page === id ? "page" : "false"}"><span aria-hidden="true">${icon}</span><span>${name}</span></button>`).join("");
 }
 function tickClock() {
+  tickMealClocks(content);
   if (views.dashboard.hidden) return;
   const now = new Date();
   document.getElementById("headerDate").textContent = new Intl.DateTimeFormat("zh-CN", {
@@ -210,7 +213,13 @@ async function refresh(force, reuseRecent = false) {
   try {
     const values = await Promise.all(calls.map(async name => {
       if (reuseRecent && sharedReads[name] && Date.now() - sharedReads[name].at < pollMs) return sharedReads[name].value;
-      const value = await rpc(name, { p_session_token: session.session_token }, signal);
+      let value;
+      try { value = await rpc(name, { p_session_token: session.session_token }, signal); }
+      catch (error) {
+        if (!['rpc_today_meal_plan','rpc_my_meal_plan'].includes(name) || isSessionError(error) || signal.aborted) throw error;
+        // Plan read failure must not hide live safety gaps or actual handoffs.
+        value = { load_error: true };
+      }
       if (myEpoch === epoch) sharedReads[name] = { value, at: Date.now() };
       return value;
     }));
@@ -219,7 +228,7 @@ async function refresh(force, reuseRecent = false) {
     updatedAt[myPage] = new Date().toISOString();
     pageError[myPage] = "";
     render();
-    return true;
+    return !values.some(value => value?.load_error);
   } catch (error) {
     if (myEpoch !== epoch || myPage !== page) return;
     if (isSessionError(error)) { showLogin("登录已失效，请重新输入个人 PIN。"); return; }
@@ -272,7 +281,7 @@ function renderHome(data) {
     `<div class="section-title"><h2>区域人力</h2><button class="action-button primary" data-open-dispatch>现场调度</button></div>` +
     `<section class="section"><div class="coverage-grid">${coverageCards(data) || '<div class="quiet-line">尚未选择模式</div>'}</div></section>` +
     section("现场人员", metrics) +
-    section("正在交接", handoffs.length ? `<div class="card-list">${handoffs.slice(0,3).map(handoffCard).join("")}</div><button class="action-button" data-open-handoffs>查看交接待办（${handoffs.length}）</button>` : '<div class="quiet-line">当前无未完成交接</div>') + reminderBody + '<div id="lifecycleSlot"></div>';
+    section("正在交接", handoffs.length ? `<div class="card-list">${handoffs.slice(0,3).map(handoffCard).join("")}</div><button class="action-button" data-open-handoffs>查看交接待办（${handoffs.length}）</button>` : '<div class="quiet-line">当前无未完成交接</div>') + reminderBody + renderNextMeals(data) + '<div id="lifecycleSlot"></div>';
 }
 function renderDispatch(data) {
   const safety = safetyGaps(data);
@@ -343,7 +352,7 @@ function renderMy(data) {
   const timing = breakTiming(row.status,row.status_since,row.status_duration_minutes);
   const hero = `<section class="my-hero"><h2>${safe(row.name || session.name)}</h2><p class="muted">${safe(row.staff_id || session.staff_id)}</p><div class="my-state">当前状态：${safe(statusLabel(row))}</div><div class="my-arrangement">当前安排：${safe(where)}</div>${timing ? `<div class="break-clock">${safe(timing)}</div>` : ""}<details class="my-schedule"><summary>查看今日排班</summary><p>${safe(datetime(row.scheduled_start_time,true))} – ${safe(datetime(row.scheduled_end_time,true))}</p></details></section>`;
   const body = tasks.length ? `<div class="card-list">${tasks.map(task => `<article class="card task-card ${task.can_i_act_next ? "task-active" : ""}" data-my-handoff-id="${safe(task.handoff_id)}"><div class="card-row"><h3>${task.can_i_act_next ? "我的交接任务" : "正在交接"}</h3><span class="pill blue">${task.can_i_act_next ? "请我处理" : "等待对方"}</span></div><div class="task-destination">${task.next_action === "finalize" ? "确认" : "前往"}${safe(task.position_name || positionLabel(task.position_id))}${task.next_action === "finalize" ? "交接完成" : "接岗"}</div><p>${safe(handoffStage(task))}${task.counterparty_name ? ` · ${safe(task.counterparty_name)}` : ""}</p></article>`).join("")}</div>` : '<div class="quiet-line">目前没有我的交接任务</div>';
-  return title("我的", label(phaseNames,row.phase,"今日现场")) + hero + section("我的任务",body);
+  return title("我的", label(phaseNames,row.phase,"今日现场")) + hero + renderMyMeal(data) + section("我的任务",body);
 }
 function render() {
   if (views.dashboard.hidden) return;
@@ -357,12 +366,12 @@ function render() {
   banner.hidden = !error;
   if (error) banner.textContent = `${cache[page] ? "连接中断，以下为上次成功读取的数据。" : "暂时无法读取现场数据。"} ${error} · ${updatedAt[page] ? `最后更新于 ${refreshedAt(updatedAt[page])}` : "请检查网络并重试"}`;
   if (!data) {
-    content.innerHTML = title({ home: "今日现场", staff: "今日人员", positions: "岗位状态", handoffs: "交接待办", dispatch: "现场调度", my: "我的" }[page], "只读现场数据") + empty(error ? "读取失败" : "正在读取现场数据", error || "请稍候…");
+    content.innerHTML = title({ home: "今日现场", staff: "今日人员", positions: "岗位状态", handoffs: "交接待办", dispatch: "现场调度", meals: "今日轮餐", my: "我的" }[page], "只读现场数据") + empty(error ? "读取失败" : "正在读取现场数据", error || "请稍候…");
     if (page === "staff") actions?.decorate(page, {}, content);
     return;
   }
   content.innerHTML = ({ home: renderHome, staff: renderStaff, positions: renderPositions,
-    handoffs: renderHandoffs, dispatch: renderDispatch, my: renderMy })[page](data) + `<p class="muted" style="font-size:11px;text-align:center;margin:10px 0 25px">最后更新 ${safe(refreshedAt(updatedAt[page]))} · 每 5 秒自动读取</p>`;
+    handoffs: renderHandoffs, dispatch: renderDispatch, my: renderMy, meals: renderMealPage })[page](data) + `<p class="muted" style="font-size:11px;text-align:center;margin:10px 0 25px">最后更新 ${safe(refreshedAt(updatedAt[page]))} · 每 5 秒自动读取</p>`;
   actions?.decorate(page, { ...Object.fromEntries(Object.entries(sharedReads).map(([name,item]) => [name,item.value])), ...data }, content);
 }
 

@@ -1,0 +1,13 @@
+.meal-card,.meal-hint,.meal-forecast-row{min-width:0;overflow-wrap:anywhere}
+.meal-card{margin:10px 0}.meal-range{font-size:22px;font-weight:750;color:#943c12}
+.meal-timeline{border-left:3px solid #f0d7c7;padding-left:12px;margin-top:16px}
+.meal-hint{background:#fff6e9;border:1px solid #eed5ab;border-radius:12px;padding:12px;margin:12px 0;font-size:14px;line-height:1.6}
+.meal-hint p{margin:6px 0}.meal-forecast{display:grid;gap:10px}.meal-forecast-row{border:1px solid #e6e1d9;border-radius:12px;padding:12px;background:white}
+.meal-forecast-row>div{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.meal-risk,.meal-block{background:#fff0ed;border:1px solid #efb2a9;border-radius:12px;padding:12px;color:#a52922;margin:12px 0}
+.baseline-not-ready{color:#755423;background:#fff8ed}.meal-unplanned{display:grid;gap:8px;padding-top:12px}
+.meal-check{display:flex;align-items:center;gap:12px;min-height:48px}.meal-check input{width:24px;height:24px;flex-shrink:0}
+.meal-highlight{outline:3px solid #df8b24} .meal-card .card-actions{display:grid;grid-template-columns:1fr 1fr}
+[data-meal-preview] .primary-button{width:100%;margin-top:12px}
+.sheet-field[hidden]{display:none!important} .section>summary{min-height:48px;cursor:pointer;font-weight:650;line-height:1.8}
+@media(max-width:430px){.meal-card .card-actions{grid-template-columns:1fr}.meal-forecast-row .pill{white-space:normal}.meal-timeline{padding-left:9px}}

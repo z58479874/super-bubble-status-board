@@ -1,0 +1,55 @@
+{
+  "rpc_staff_management_detail": [
+    "p_session_token",
+    "p_staff_id"
+  ],
+  "rpc_staff_name_candidates": [
+    "p_name",
+    "p_session_token"
+  ],
+  "rpc_staff_assignable_positions": [
+    "p_session_token",
+    "p_staff_id"
+  ],
+  "rpc_staff_create": [
+    "p_confirm_distinct_person",
+    "p_confirm_high_privilege",
+    "p_department",
+    "p_employment_type",
+    "p_name",
+    "p_request_id",
+    "p_role",
+    "p_session_token"
+  ],
+  "rpc_staff_update_profile": [
+    "p_confirm_role_change",
+    "p_department",
+    "p_employment_type",
+    "p_expected_revision",
+    "p_name",
+    "p_role",
+    "p_session_token",
+    "p_staff_id"
+  ],
+  "rpc_staff_update_positions": [
+    "p_expected_revision",
+    "p_position_ids",
+    "p_session_token",
+    "p_staff_id"
+  ],
+  "rpc_staff_deactivate": [
+    "p_expected_revision",
+    "p_reason",
+    "p_session_token",
+    "p_staff_id"
+  ],
+  "rpc_staff_reactivate": [
+    "p_confirm_role_change",
+    "p_department",
+    "p_employment_type",
+    "p_expected_revision",
+    "p_role",
+    "p_session_token",
+    "p_staff_id"
+  ]
+}

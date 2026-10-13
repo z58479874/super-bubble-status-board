@@ -1,3 +1,4 @@
+import { createMealActions } from './meal-plans.js';
 import { roleNames, employmentNames, modeNames, stateNames, label as displayLabel, areaLabel, positionLabel, statusLabel, handoffStage, nextActionNames, businessError, debugError, safetyPositionIds } from "./displayLabels.js";
 import { createStaffManagement } from './staff-management.js';
 // 013: 手机写操作仅使用既有 public RPC；规则和权限仍由数据库决定。
@@ -19,6 +20,8 @@ export function createActions(api) {
   const staffManagement = createStaffManagement({ rpc, getSession, renderSheet, getSheet: () => sheet,
     closeSheet, callWrite, setSheetError, openResetPin, requireLogin, escapeHtml,
     invalidateDirectory: () => { directoryRows = null; } });
+  const mealActions = createMealActions({rpc, getSession, getData: () => currentData || {}, renderSheet,
+    getSheet: () => sheet, closeSheet, callWrite, setSheetError, navigatePage, openMySafetyLeave, openStaff});
   const overview = () => getPage() === 'my' ? currentData?.rpc_my_today_state || {} : currentData?.rpc_today_overview || {};
   const phase = () => overview().phase || "not_prepared";
   const staffRows = () => currentData?.rpc_today_staff || [];
@@ -165,6 +168,7 @@ export function createActions(api) {
     if (isManager() && page === "positions") decoratePositions(content);
     if (isManager() && page === "handoffs") decorateHandoffs(content);
     if (page === "my") decorateMy(content);
+    mealActions.decorate(page, currentData, content);
   }
 
   function decorateLifecycle(content) {

@@ -1,0 +1,12 @@
+{
+  "name": "super-bubble-status-board",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "test": "node tools/test.mjs",
+    "verify:release": "node tools/verify-release.mjs",
+    "dev": "node tools/serve.mjs"
+  },
+  "devDependencies": { "playwright": "1.55.1" }
+}
