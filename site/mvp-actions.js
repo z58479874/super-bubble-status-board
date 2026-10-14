@@ -21,7 +21,7 @@ export function createActions(api) {
     closeSheet, callWrite, setSheetError, openResetPin, requireLogin, escapeHtml,
     invalidateDirectory: () => { directoryRows = null; } });
   const mealActions = createMealActions({rpc, getSession, getData: () => currentData || {}, renderSheet,
-    getSheet: () => sheet, closeSheet, callWrite, setSheetError, navigatePage, openMySafetyLeave, openStaff});
+    getSheet: () => sheet, closeSheet, callWrite, setSheetError, navigatePage, openMySafetyLeave, openMySafetyReturn, openStaff});
   const overview = () => getPage() === 'my' ? currentData?.rpc_my_today_state || {} : currentData?.rpc_today_overview || {};
   const phase = () => overview().phase || "not_prepared";
   const staffRows = () => currentData?.rpc_today_staff || [];
@@ -736,11 +736,28 @@ export function createActions(api) {
     renderSheet({ title: "申请安全岗交接", description: "仅用于正在值守的安全关键岗。原占岗人发起后仍须留在岗位，直到接岗人到位且本人最终确认。请先和接岗人完成现场沟通。", body: `<label class="sheet-field">申请动作<select name="handoffAction"><option value="meal">吃饭</option><option value="short_leave">短时离岗</option></select></label>${field("接岗人员工编号", "incoming", "text", "", 'autocomplete="off" placeholder="例如 FT002"')}<p class="sheet-hint">本人页不开放全员候选列表；请填已沟通好的员工编号。数据库仍会核验该员工的可安排关系、今日状态与交接条件。</p>`, buttons: [
       { label: "返回", action: closeSheet },
       { label: "发起交接", primary: true, action: () => {
-        const incoming = value("incoming").toUpperCase();
+        if(value("handoffAction")==="meal") {
+            const plan=currentData?.rpc_my_meal_plan?.plan;
+            if(!plan||plan.status!=="planned"){setSheetError("请先由店长或副店安排午餐。");return;}
+            if(plan.meal_evidence?.latest_meal_started_at){setSheetError("今日午餐已经开始过，如需再次离岗请联系管理人员。");return;}
+            if(['manager_start_meal','ask_manager_start_meal'].includes(plan.next_action)){setSheetError("当前安排无需安全交接，请关闭此窗口，在“今日午餐”中确认开始吃饭。");return;}
+            callWrite("rpc_my_start_meal",{p_expected_revision:plan.revision,p_confirm_ready:false},"午餐交接已发起，请继续留岗至交接完成。");return;
+          }
+          const incoming = value("incoming").toUpperCase();
         if (!incoming) { setSheetError("请填写接岗人员工编号。 "); return; }
         callWrite("rpc_live_request_handoff", { p_flow: "leave", p_action: value("handoffAction"), p_position: row.current_position_id, p_outgoing: getSession().staff_id, p_incoming: incoming, p_next_type: null, p_next_position: null, p_next_area: null }, "交接已发起。请继续留在原岗，等待接岗人出发并确认到位。 ");
       } }
     ] });
+    const updateMealCover = () => {
+      const isMeal=value("handoffAction")==="meal";
+      const incoming=sheet.querySelector('[name=incoming]');
+      incoming.closest('label').hidden=isMeal;
+      const note=sheet.querySelector('.sheet-hint');
+      const plan=currentData?.rpc_my_meal_plan?.plan;
+      note.textContent=isMeal ? (plan?.status==='planned' ? `午餐接岗按已确认计划：${plan.cover_staff_name||"请店长或副店指定接岗人"}。不能自行更换接岗人。` : '请先由店长或副店安排午餐。') : '短时离岗请填写已沟通好的接岗人员工编号，数据库会核验可安排关系和当前状态。';
+    };
+    sheet.querySelector('[name=handoffAction]').addEventListener('change',updateMealCover);
+    updateMealCover();
   }
   async function openMySafetyReturn(row) {
     renderSheet({ title: "申请安全岗返岗交接", description: "正在核对返岗岗位的实时占岗人…" });

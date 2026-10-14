@@ -370,7 +370,7 @@ function renderMy(data) {
   const timing = breakTiming(row.status,row.status_since,row.status_duration_minutes);
   const hero = `<section class="my-hero"><h2>${safe(row.name || session.name)}</h2><p class="muted">${safe(row.staff_id || session.staff_id)}</p><div class="my-state">当前状态：${safe(statusLabel(row))}</div><div class="my-arrangement">当前安排：${safe(where)}</div>${timing ? `<div class="break-clock">${safe(timing)}</div>` : ""}<details class="my-schedule"><summary>查看今日排班</summary><p>${safe(datetime(row.scheduled_start_time,true))} – ${safe(datetime(row.scheduled_end_time,true))}</p></details></section>`;
   const body = tasks.length ? `<div class="card-list">${tasks.map(task => `<article class="card task-card ${task.can_i_act_next ? "task-active" : ""}" data-my-handoff-id="${safe(task.handoff_id)}"><div class="card-row"><h3>${task.can_i_act_next ? "我的交接任务" : "正在交接"}</h3><span class="pill blue">${task.can_i_act_next ? "请我处理" : "等待对方"}</span></div><div class="task-destination">${task.next_action === "finalize" ? "确认" : "前往"}${safe(task.position_name || positionLabel(task.position_id))}${task.next_action === "finalize" ? "交接完成" : "接岗"}</div><p>${safe(handoffStage(task))}${task.counterparty_name ? ` · ${safe(task.counterparty_name)}` : ""}</p></article>`).join("")}</div>` : '<div class="quiet-line">目前没有我的交接任务</div>';
-  return title("我的", label(phaseNames,row.phase,"今日现场")) + hero + renderMyMeal(data) + section("我的任务",body);
+  return title("我的", label(phaseNames,row.phase,"今日现场")) + renderMyMeal(data) + hero + section("我的任务",body);
 }
 function render() {
   if (views.dashboard.hidden) return;
@@ -389,7 +389,7 @@ function render() {
     return;
   }
   content.innerHTML = ({ home: renderHome, staff: renderStaff, positions: renderPositions,
-    handoffs: renderHandoffs, dispatch: renderDispatch, my: renderMy, meals: renderMealPage })[page](data) + `<p class="muted" style="font-size:11px;text-align:center;margin:10px 0 25px">最后更新 ${safe(refreshedAt(updatedAt[page]))} · 每 5 秒自动读取</p>`;
+    handoffs: renderHandoffs, dispatch: renderDispatch, my: renderMy, meals: data => renderMealPage(data,session?.role) })[page](data) + `<p class="muted" style="font-size:11px;text-align:center;margin:10px 0 25px">最后更新 ${safe(refreshedAt(updatedAt[page]))} · 每 ${page === "meals" ? 15 : 5} 秒自动读取</p>`;
   actions?.decorate(page, { ...Object.fromEntries(Object.entries(sharedReads).map(([name,item]) => [name,item.value])), ...data }, content);
 }
 
