@@ -37,7 +37,7 @@ async function open(id) {
     try {
       if (offline) return route.fulfill({status:503,json:{message:'network unavailable',code:'PGRST000'}});
       if (expired) return route.fulfill({status:401,json:{message:'会话已失效，请重新验证身份',code:'28000'}});
-      if (rejectTransfer && name==='rpc_live_begin_transfer') return route.fulfill({status:400,json:{message:'区域 front_hall 将由 1 人降至 0 人，低于最低 4 人；先补足人员',code:'P0001'}});
+      if (rejectTransfer && name==='rpc_live_begin_transfer') return route.fulfill({status:400,json:{message:'区域 front_hall 将由 1 人降至 0 人，低于最低 2 人；先补足人员',code:'P0001'}});
       let result=mock.rpc(name,params);
       if(name==='rpc_today_alerts') result={...result,alerts:[...result.alerts,{kind:'meal_over_45',staff_id:'FT005',staff_name:'模拟人员5',duration_minutes:48}]};
       // Simulate void RPC bodies exactly like production's successful writes.
@@ -57,7 +57,7 @@ const refresh=async page=>{ await page.locator('#refreshButton').click(); await 
 const width=async page=>{ const size=await page.evaluate(()=>({width:innerWidth,document:document.documentElement.scrollWidth,panel:document.querySelector('.sheet-panel')?.getBoundingClientRect().width||0})); assert.ok(size.document<=size.width&&size.panel<=size.width,JSON.stringify(size)); };
 const chinese=async page=>{ assert.doesNotMatch(await page.locator('body').innerText(),/front_hall|high_altitude|high_expansion|second_floor|mobile_pool|area_standby|in_transit|awaiting_incoming|awaiting_outgoing|short_leave|not_arrived|temporary_part_time|regular_part_time|on_duty|off_duty|end_cover/); };
 try {
-  assert.equal(businessError({message:'区域 front_hall 将由 1 人降至 0 人，低于最低 4 人；先补足人员'}),'前厅最低需要4人，当前只有1人。请先安排其他人员补位。');
+  assert.equal(businessError({message:'区域 front_hall 将由 1 人降至 0 人，低于最低 2 人；先补足人员'}),'前厅最低需要2人，当前只有1人。请先安排其他人员补位。');
   assert.match(businessError('返岗关系不符'),/顶岗关系已经发生变化/);
   assert.match(businessError('该岗位已有未完成交接'),/交接正在进行/);
   assert.match(businessError('安全关键岗必须先发起交接'),/双人交接/);
@@ -69,7 +69,7 @@ try {
   assert.match(await page.locator('#content .section').first().innerText(),/安全关键岗无人值守/);
   assert.equal(await page.locator('[data-position-focus]').count(),3);
   await page.getByText('查看全部',{exact:true}).waitFor();
-  assert.match(await page.locator('[data-area-focus="high_altitude"]').innerText(),/最低 7 人/);
+  assert.match(await page.locator('[data-area-focus="high_altitude"]').innerText(),/最低 6 人/);
   await chinese(page); await width(page);
   await page.screenshot({path:'artifacts/014-home-390.png',fullPage:true});
   passed('首页安全优先、前三项与查看全部、区域最低人数、390px');
@@ -84,14 +84,16 @@ try {
   await page.screenshot({path:'artifacts/014-dispatch-390.png',fullPage:true});
   passed('告警定位、调度缺口排序、排除安全占岗/离岗/途中/交接/顶岗');
   await page.locator('[data-dispatch-select="FT001"]').click(); await dialog(page).locator('[name="assignmentType"]').waitFor();
-  assert.equal(await dialog(page).locator('[name="position"] option[value="plum"]').count(),0);
+  assert.equal(await dialog(page).locator('[name="position"] option:not([value=""])').count(),29);
+  assert.equal(await dialog(page).locator('[name="position"] option[value="plum"]').count(),1);
+  assert.equal(await dialog(page).locator('[name="position"] option[value="m1"]').count(),0);
   await dialog(page).locator('[name="assignmentType"]').selectOption('area_standby'); await dialog(page).locator('[name="area"]').selectOption('front_hall');
   await dialog(page).getByRole('button',{name:'开始前往',exact:true}).click(); await dialog(page).waitFor({state:'detached'});
   assert.equal(mock.state('FT001').current_assignment_type,'in_transit');
   await page.locator('[data-page="staff"]').click(); await page.locator('[data-staff-id="FT001"]').getByRole('button',{name:'操作',exact:true}).click();
   await dialog(page).getByRole('button',{name:'确认到位',exact:true}).click(); await dialog(page).waitFor({state:'detached'});
   assert.equal(mock.state('FT001').current_assignment_type,'area_standby'); assert.equal(mock.state('FT001').current_area_code,'front_hall');
-  passed('普通调岗两阶段，安全目标不出现在普通调岗选择器');
+  passed('普通调岗两阶段，29个固定岗位均显示且机动资源不伪装为岗位');
   await page.locator('[data-page="home"]').click(); await page.locator('[data-staff-focus="FT005"]').click();
   assert.match(await dialog(page).innerText(),/返岗/); await close(page);
   await page.locator('[data-page="staff"]').click(); await page.locator('[data-staff-id="FT002"]').getByRole('button',{name:'操作',exact:true}).click();
@@ -104,7 +106,7 @@ try {
   assert.match(await dialog(page).innerText(),/调离后该区域将低于最低人数/);
   await dialog(page).locator('[name="assignmentType"]').selectOption('mobile_pool'); rejectTransfer=true;
   await dialog(page).getByRole('button',{name:'开始前往',exact:true}).click();
-  await dialog(page).getByText('前厅最低需要4人，当前只有1人。请先安排其他人员补位。',{exact:true}).waitFor();
+  await dialog(page).getByText('前厅最低需要2人，当前只有1人。请先安排其他人员补位。',{exact:true}).waitFor();
   assert.equal(mock.state('FT004').current_position_id,'sale1');
   await dialog(page).locator('.debug-error summary').waitFor(); await chinese(page); rejectTransfer=false; await close(page);
   passed('来源最低覆盖提示、数据库拒绝后不改UI事实、管理端折叠原始错误');

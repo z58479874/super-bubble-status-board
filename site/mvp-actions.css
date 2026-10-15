@@ -26,6 +26,9 @@
 .sheet-field input,.sheet-field select{height:48px}
 .sheet-field textarea{min-height:80px;resize:vertical}
 .sheet-field input:focus,.sheet-field select:focus,.sheet-field textarea:focus{border-color:#e9814e;box-shadow:0 0 0 3px #f2763e20}
+.sheet-field select optgroup{font-weight:850;color:#315d47}
+.sheet-field select option{font-weight:500;color:#263744}
+.mobile-pool-note[hidden]{display:none}
 .sheet-buttons{display:grid;gap:9px;margin-top:16px}
 .sheet-buttons button{width:100%;min-height:48px;border-radius:10px;padding:9px 12px;font-size:14px;font-weight:850}
 .sheet-buttons .primary-button{margin:0}

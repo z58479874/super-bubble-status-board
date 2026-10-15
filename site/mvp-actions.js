@@ -433,30 +433,68 @@ export function createActions(api) {
     renderSheet({ title: "已加入今日人员名单", body: `<div class="result-card"><strong>${e(result?.staff_id || "请在今日人员核对新编号")}</strong><p>${e(result?.name || draft.name)}</p><p>今日排班：${e(datetime(draft.start, true))} – ${e(datetime(draft.end, true))}</p><p>现场状态：未到岗</p><p>未自动生成 PIN；如需本人参与安全交接，店长可单独初始化 PIN。</p></div>`, buttons: [{ label: "完成", primary: true, action: closeSheet }] });
   }
 
-  function assignmentFields(positions, allowSafety, preset = {}) {
-    const fixed = positions.filter(item => !item.is_mobile && item.snapshot_present !== false && item.expected_open === true && (allowSafety || !item.is_safety_critical));
-    const options = fixed.map(item => `<option value="${e(item.position_id)}" data-safety="${Boolean(item.is_safety_critical)}" ${preset.position === item.position_id ? "selected" : ""}>${e(areaLabel(item.area_code))} · ${e(item.name)}${item.expected_open ? "" : "（今日未启用）"}</option>`).join("");
-    const areaOptions = Object.entries(areaNames).filter(([id]) => id !== "global").map(([id, label]) => `<option value="${e(id)}" ${preset.area === id ? "selected" : ""}>${e(label)}</option>`).join("");
-    return `<label class="sheet-field">当前实际安排<select name="assignmentType"><option value="" ${!preset.type ? "selected" : ""}>请选择安排方式</option><option value="position" ${preset.type === "position" ? "selected" : ""}>具体岗位</option><option value="area_standby" ${preset.type === "area_standby" ? "selected" : ""}>区域待命</option><option value="mobile_pool" ${preset.type === "mobile_pool" ? "selected" : ""}>全场机动</option></select></label><label class="sheet-field" data-assignment-field="position">具体岗位<select name="position"><option value="">请选择</option>${options}</select></label><label class="sheet-field" data-assignment-field="area">所属区域<select name="area"><option value="">请选择</option>${areaOptions}</select></label><p class="sheet-hint" data-candidate-hint></p>`;
+  const transferAreaOrder = ["entrance", "front_hall", "toddler_vr", "high_altitude", "high_expansion", "second_floor"];
+  function positionChoiceLabel(item) {
+    const state = item.snapshot_present === false ? "尚无今日快照" : item.expected_open === true ? "已启用" : "今日未启用";
+    const occupant = item.current_staff_name ? `${item.current_staff_name}值守` : item.expected_open === true ? "当前空岗" : null;
+    return [item.name, item.is_safety_critical ? "安全岗" : null, state, occupant].filter(Boolean).join(" · ");
   }
-  function wireAssignment(root, staffId) {
+  function assignmentFields(positions, allowSafety, preset = {}, options = {}) {
+    const fixed = positions.filter(item => !item.is_mobile && (options.showAllFixed || item.snapshot_present !== false && item.expected_open === true && (allowSafety || !item.is_safety_critical)));
+    const groups = transferAreaOrder.map(code => {
+      const rows = fixed.filter(item => item.area_code === code);
+      return rows.length ? `<optgroup label="${e(areaLabel(code))}">${rows.map(item => `<option value="${e(item.position_id)}" data-safety="${Boolean(item.is_safety_critical)}" data-open="${item.expected_open === true}" ${preset.position === item.position_id ? "selected" : ""}>${e(positionChoiceLabel(item))}</option>`).join("")}</optgroup>` : "";
+    }).join("");
+    const areaOptions = Object.entries(areaNames).filter(([id]) => id !== "global").map(([id, label]) => `<option value="${e(id)}" ${preset.area === id ? "selected" : ""}>${e(label)}</option>`).join("");
+    return `<label class="sheet-field">当前实际安排<select name="assignmentType"><option value="" ${!preset.type ? "selected" : ""}>请选择安排方式</option><option value="position" ${preset.type === "position" ? "selected" : ""}>具体岗位</option><option value="area_standby" ${preset.type === "area_standby" ? "selected" : ""}>区域待命</option><option value="mobile_pool" ${preset.type === "mobile_pool" ? "selected" : ""}>全场机动</option></select></label><label class="sheet-field" data-assignment-field="position">具体岗位<select name="position"><option value="">请选择</option>${groups}</select></label><label class="sheet-field" data-assignment-field="area">所属区域<select name="area"><option value="">请选择</option>${areaOptions}</select></label><p class="sheet-hint" data-candidate-hint></p><p class="sheet-hint mobile-pool-note">M1、M2、二楼机动当前按“全场机动”统一记录，不伪造成固定岗位。</p>`;
+  }
+  function transferButtonLabel(position) {
+    if (!position) return "开始前往";
+    if (position.expected_open !== true) return position.is_safety_critical ? "先恢复安全岗" : "先恢复今日岗位";
+    if (position.is_safety_critical) return position.current_staff_id ? "进入安全岗交接" : "发起安全补岗";
+    return "开始前往";
+  }
+  function wireAssignment(root, staffId, options = {}) {
     const type = $('[name="assignmentType"]', root);
     const pos = $('[name="position"]', root);
     const posField = $('[data-assignment-field="position"]', root);
     const areaField = $('[data-assignment-field="area"]', root);
     const hint = $('[data-candidate-hint]', root);
+    const mobileNote = $(".mobile-pool-note", root);
+    const submit = root.querySelector(".sheet-buttons .primary-button");
+    let requestId = 0;
     const update = async () => {
+      const sequence = ++requestId;
       posField.hidden = type.value !== "position";
       areaField.hidden = type.value !== "area_standby";
-      if (type.value !== "position" || !pos.value || !staffId) { hint.textContent = ""; return; }
+      mobileNote.hidden = type.value !== "mobile_pool";
+      const selected = options.positions?.find(item => item.position_id === pos.value);
+      if (options.transferMode && submit) submit.textContent = type.value === "position" ? transferButtonLabel(selected) : "开始前往";
+      root.dataset.assignmentPermission = "unknown";
+      if (submit) submit.disabled = type.value === "position";
+      if (type.value !== "position" || !pos.value) { hint.textContent = ""; if (submit) submit.disabled = false; return; }
+      const status = selected ? `${selected.is_safety_critical ? "安全关键岗" : "普通岗位"} · ${selected.expected_open === true ? "已启用" : "今日未启用"}${selected.current_staff_name ? ` · 当前由${selected.current_staff_name}值守` : selected.expected_open === true ? " · 当前空岗" : ""}` : "";
+      if (!staffId) { hint.textContent = status; return; }
       hint.textContent = "正在核对可安排岗位…";
       try {
         const candidates = await rpc("rpc_position_candidates", { p_session_token: token(), p_position_id: pos.value });
+        if (sequence !== requestId || !sheet?.contains(root)) return;
         const candidate = (candidates || []).find(item => item.staff_id === staffId);
-        hint.textContent = !candidate ? "今日人员名单中未找到此人，提交会被数据库拒绝。" : candidate.has_required_assignment_permission ? "该员工拥有此岗位的可安排关系；现场状态仍由数据库最终确认。" : "该员工缺少此岗位的可安排关系，不能提交。";
-      } catch (error) { hint.textContent = explain(error); }
+        const permitted = candidate?.has_required_assignment_permission === true;
+        root.dataset.assignmentPermission = permitted ? "allowed" : "denied";
+        if (submit) submit.disabled = !permitted;
+        hint.textContent = !candidate ? `${status}。今日人员名单中未找到此人，不能提交。` : permitted ? `${status}。该员工可独立安排此岗位；最终仍由数据库校验现场状态。` : `${status}。该员工当前没有此岗位的可安排关系，不能安排。`;
+      } catch (error) { hint.textContent = explain(error); if (submit) submit.disabled = true; }
     };
     type.addEventListener("change", update); pos.addEventListener("change", update); update();
+  }
+  async function validatePositionCandidate(staffId, positionId, { requireEligible = false } = {}) {
+    const candidates = await rpc("rpc_position_candidates", { p_session_token: token(), p_position_id: positionId });
+    const candidate = (candidates || []).find(item => item.staff_id === staffId);
+    if (!candidate) throw new Error("今日人员名单中未找到该员工，不能安排。 ");
+    if (candidate.has_required_assignment_permission !== true) throw new Error("该员工当前没有此岗位的可安排关系，不能安排。 ");
+    if (requireEligible && candidate.eligible !== true) throw new Error(candidate.ineligible_reason || "该员工当前状态不适合执行此调岗。 ");
+    return candidate;
   }
   function selectedAssignment() {
     const type = value("assignmentType");
@@ -493,8 +531,9 @@ export function createActions(api) {
       if (["arrival", "preassign"].includes(kind)) positions = await arrivalPositions(positions, row.staff_id);
     } catch (error) { setSheetError(explain(error), error); return; }
     const titles = { arrival: `确认 ${row.name} 到岗`, preassign: `调整 ${row.name} 的开园前安排`, transfer: `调动 ${row.name}`, return: `重新安排 ${row.name} 返岗`, cancel: "安排接岗人取消后的去向", outgoing: "交出安全岗后的去向" };
-    const intro = kind === "arrival" || kind === "preassign" ? "到岗安排必须选实际岗位、区域待命或机动；开园前调整会记录操作流水。" : kind === "transfer" ? "普通调岗不得直接前往安全关键岗。" : kind === "return" ? "原返岗目标不能安全恢复，请另选合法安排。" : "只能选择非安全固定岗位、区域待命或机动池。";
-    renderSheet({ title: titles[kind], description: intro, body: assignmentFields(positions, allowSafety) + (kind === "transfer" ? sourceRisk(row, positions) : ""), buttons: [
+    const intro = kind === "arrival" || kind === "preassign" ? "到岗安排必须选实际岗位、区域待命或机动；开园前调整会记录操作流水。" : kind === "transfer" ? "全部固定岗位都会显示。系统会根据启用状态、安全属性和可安排关系引导正确流程。" : kind === "return" ? "原返岗目标不能安全恢复，请另选合法安排。" : "只能选择非安全固定岗位、区域待命或机动池。";
+    const transferMode = kind === "transfer";
+    renderSheet({ title: titles[kind], description: intro, body: assignmentFields(positions, allowSafety, {}, { showAllFixed: transferMode }) + (transferMode ? sourceRisk(row, positions) : ""), buttons: [
       { label: "返回", action: closeSheet },
       { label: kind === "arrival" ? "确认到岗" : kind === "preassign" ? "保存开园前安排" : kind === "transfer" ? "开始前往" : kind === "return" ? "确认返岗" : "确认安排", primary: true, action: async () => {
         let target; try { target = selectedAssignment(); } catch (error) { setSheetError(error.message); return; }
@@ -504,14 +543,105 @@ export function createActions(api) {
             confirm("安全关键岗到岗提示", "这名员工到岗后会先记录为前往该安全岗，尚未正式占岗。仍须发起安全岗补位交接并完成双方确认。", "确认到岗并前往", () => submitArrival(row, target));
           } else submitArrival(row, target);
         } else if (kind === "transfer") {
-          callWrite("rpc_live_begin_transfer", { p_staff_id: row.staff_id, p_type: target.type, p_position: target.position, p_area: target.area }, "调岗已发起；到达后请确认到位。 ");
+          if (target.type === "position") {
+            const position = positions.find(item => item.position_id === target.position);
+            if (!position) { setSheetError("岗位数据已变化，请刷新后重试。 "); return; }
+            try { await openTransferPositionTarget(row, position); }
+            catch (error) { setSheetError(explain(error), error); }
+          } else callWrite("rpc_live_begin_transfer", { p_staff_id: row.staff_id, p_type: target.type, p_position: target.position, p_area: target.area }, "调岗已发起；到达后请确认到位。 ");
         } else if (kind === "return") {
           callWrite("rpc_live_return_from_break", { p_staff_id: row.staff_id, p_type: target.type, p_position: target.position, p_area: target.area }, "返岗已记录。 ");
         } else if (kind === "cancel") {
           callWrite("rpc_live_cancel_handoff", { p_handoff_id: extra.handoffId, p_incoming_type: target.type, p_incoming_position: target.position, p_incoming_area: target.area, p_reason: extra.reason }, "交接已取消，并记录接岗人的新安排。 ");
-        } else if (kind === "outgoing") extra.done?.(target);
+        } else if (kind === "outgoing") {
+          try {
+            if (target.type === "position") await validatePositionCandidate(row.staff_id, target.position, { requireEligible: false });
+            extra.done?.(target);
+          } catch (error) { setSheetError(explain(error), error); }
+        }
       } }
-    ], onOpen: root => wireAssignment(root, kind === "outgoing" ? null : row.staff_id) });
+    ], onOpen: root => wireAssignment(root, row.staff_id, { positions, transferMode }) });
+  }
+  async function latestPosition(positionId) {
+    const rows = await rpc("rpc_today_positions", { p_session_token: token() });
+    return (rows || []).find(item => item.position_id === positionId);
+  }
+  async function openTransferPositionTarget(row, position) {
+    await validatePositionCandidate(row.staff_id, position.position_id, { requireEligible: true });
+    if (position.expected_open !== true) { openRestoreTransferPosition(row, position); return; }
+    if (!position.is_safety_critical) {
+      callWrite("rpc_live_begin_transfer", { p_staff_id: row.staff_id, p_type: "position", p_position: position.position_id, p_area: null }, "调岗已发起；到达后请确认到位。 ");
+      return;
+    }
+    if (position.pending_handoff_id) {
+      renderSheet({ title: `${position.name} · 已有交接`, description: "该安全岗已有未完成交接，请先处理现有交接后刷新。", buttons: [{ label: "关闭", action: closeSheet }] });
+      return;
+    }
+    if (!position.current_staff_id) {
+      renderSheet({ title: `${position.name} · 安全补岗`, description: "这是安全关键岗，当前空岗。不能普通调岗；发起后须由接岗人本人开始前往、确认到位，再由管理人员最终确认。", body: `<p class="sheet-hint">接岗人：${e(row.name)} · ${e(row.staff_id)}</p>`, buttons: [
+        { label: "返回岗位选择", action: () => openAssignment("transfer", staffById(row.staff_id) || row, false) },
+        { label: "发起安全补岗", primary: true, action: () => requestSelectedSafetyHandoff(row, position, null, null) }
+      ] });
+      return;
+    }
+    const outgoing = staffById(position.current_staff_id) || { staff_id: position.current_staff_id, name: position.current_staff_name || position.current_staff_id };
+    renderSheet({ title: `${position.name} · 安全岗换人`, description: `${position.name}当前由${position.current_staff_name || position.current_staff_id}值守，需要办理安全岗换人交接。原占岗人继续留岗，直到接岗人到位并由原占岗人最终确认。`, body: `<p class="sheet-hint">调入员工：${e(row.name)} · ${e(row.staff_id)}</p>`, buttons: [
+      { label: "返回岗位选择", action: () => openAssignment("transfer", staffById(row.staff_id) || row, false) },
+      { label: "选择原占岗人交接后的去向", primary: true, action: () => openAssignment("outgoing", outgoing, false, { done: next => confirmSelectedSafetyHandoff(row, position, outgoing, next) }) }
+    ] });
+  }
+  function openRestoreTransferPosition(row, position) {
+    renderSheet({ title: `恢复今日岗位 · ${position.name}`, description: position.is_safety_critical ? "这是安全关键岗，今天尚未启用。恢复后仍必须根据实时占岗情况进入安全补岗或换人交接。" : "该岗位今天尚未启用，需要先恢复今日岗位，再单独开始调岗。", body: textarea("恢复原因", "reason", "例如：现场决定恢复项目服务"), buttons: [
+      { label: "返回岗位选择", action: () => openAssignment("transfer", staffById(row.staff_id) || row, false) },
+      { label: position.is_safety_critical ? "确认恢复安全岗" : "确认恢复今日岗位", primary: true, action: async () => {
+        const reason = checkReason(); if (!reason) return;
+        const outcome = await callWrite("rpc_live_set_position_open", { p_position: position.position_id, p_open: true, p_reason: reason }, `${position.name}已恢复，请继续确认调岗。`, { keepSheet: true });
+        if (!outcome.ok || !outcome.refreshOk) return;
+        let fresh;
+        try { fresh = await latestPosition(position.position_id); }
+        catch (error) { setSheetError("岗位已恢复，但最新现场数据读取失败。请关闭后刷新再继续。", error); return; }
+        if (!fresh?.expected_open) { setSheetError("岗位恢复结果尚未生效，请刷新最新状态后重试。 "); return; }
+        try {
+          if (fresh.is_safety_critical) await openTransferPositionTarget(staffById(row.staff_id) || row, fresh);
+          else openRestoredOrdinaryTransfer(staffById(row.staff_id) || row, fresh);
+        }
+        catch (error) { setSheetError(explain(error), error); }
+      } }
+    ] });
+  }
+  function openRestoredOrdinaryTransfer(row, position) {
+    renderSheet({ title: `${position.name} · 已恢复`, description: "恢复今日岗位和开始调岗是两个独立操作。岗位已恢复，请再次确认员工现在开始前往。", body: `<p class="sheet-hint">调动员工：${e(row.name)} · ${e(row.staff_id)}</p>`, buttons: [
+      { label: "返回岗位选择", action: () => openAssignment("transfer", staffById(row.staff_id) || row, false) },
+      { label: "开始调岗", primary: true, action: async () => {
+        try {
+          const fresh = await latestPosition(position.position_id);
+          if (!fresh || fresh.expected_open !== true || fresh.is_safety_critical) throw new Error("岗位状态已变化，请刷新后重新选择。 ");
+          await validatePositionCandidate(row.staff_id, position.position_id, { requireEligible: true });
+          callWrite("rpc_live_begin_transfer", { p_staff_id: row.staff_id, p_type: "position", p_position: position.position_id, p_area: null }, "调岗已发起；到达后请确认到位。 ");
+        } catch (error) { setSheetError(explain(error), error); }
+      } }
+    ] });
+  }
+  function assignmentSummary(target) {
+    if (target.type === "position") return positionById(target.position)?.name || positionLabel(target.position);
+    if (target.type === "area_standby") return `${areaLabel(target.area)}待命`;
+    return "全场机动";
+  }
+  function confirmSelectedSafetyHandoff(incoming, position, outgoing, next) {
+    renderSheet({ title: `确认 ${position.name} 安全换岗`, description: "这是两次独立的现场动作：现在只发起交接；接岗人本人出发、到位后，仍由原占岗人最终确认。", body: `<dl class="staff-detail-grid"><div><dt>原占岗人</dt><dd>${e(outgoing.name)} · ${e(outgoing.staff_id)}</dd></div><div><dt>接岗人</dt><dd>${e(incoming.name)} · ${e(incoming.staff_id)}</dd></div><div><dt>原占岗人交接后去向</dt><dd>${e(assignmentSummary(next))}</dd></div></dl>`, buttons: [
+      { label: "返回修改去向", action: () => openAssignment("outgoing", outgoing, false, { done: changed => confirmSelectedSafetyHandoff(incoming, position, outgoing, changed) }) },
+      { label: "确认发起安全交接", primary: true, action: () => requestSelectedSafetyHandoff(incoming, position, outgoing.staff_id, next) }
+    ] });
+  }
+  async function requestSelectedSafetyHandoff(incoming, position, outgoingStaffId, next) {
+    try {
+      const fresh = await latestPosition(position.position_id);
+      if (!fresh?.is_safety_critical || fresh.expected_open !== true) throw new Error("安全岗状态已变化，请刷新后重新选择。 ");
+      if (fresh.pending_handoff_id) throw new Error("该安全岗已有未完成交接，请先处理现有交接。 ");
+      if ((fresh.current_staff_id || null) !== (outgoingStaffId || null)) throw new Error("安全岗当前值守人员已变化，请刷新后重新办理。 ");
+      await validatePositionCandidate(incoming.staff_id, position.position_id, { requireEligible: true });
+      callWrite("rpc_live_request_handoff", { p_flow: outgoingStaffId ? "leave" : "gap", p_action: outgoingStaffId ? "transfer" : "fill", p_position: position.position_id, p_outgoing: outgoingStaffId || null, p_incoming: incoming.staff_id, p_next_type: next?.type || null, p_next_position: next?.position || null, p_next_area: next?.area || null }, outgoingStaffId ? "安全岗换人交接已发起，请通知接岗人本人开始前往。" : "安全补岗已发起，请通知接岗人本人开始前往。 ");
+    } catch (error) { setSheetError(explain(error), error); }
   }
   function submitArrival(row, target) {
     const pre = phase() === "not_started";

@@ -19,9 +19,9 @@ const mobile = new Set(["floor2mobile", "m1", "m2"]);
 const yellowDefault = new Set(["sale1", "sale2", "slide", "patrol", "vr1", "gear1", "gear2", "gear3", "gear4", "plum", "climb", "leap", "swing1", "swing2", "expand1", "expand2", "expand3", "expand4", "expand5", "expand6", "expand7", "arcade1", "arcade2"]);
 const greenDefault = new Set(["sale1", "sale2"]);
 const baseCoverage = {
-  green: [["entrance", 0, 0], ["front_hall", 2, 2], ["toddler_vr", 1, 1], ["high_altitude", 3, 3], ["high_expansion", 0, 0], ["second_floor", 0, 0], ["global", 0, 1]],
-  yellow: [["entrance", 1, 1], ["front_hall", 4, 4], ["toddler_vr", 3, 3], ["high_altitude", 7, 9], ["high_expansion", 5, 7], ["second_floor", 1, 2], ["global", 0, 2]],
-  red: [["entrance", 2, 2], ["front_hall", 5, 5], ["toddler_vr", 4, 4], ["high_altitude", 9, 10], ["high_expansion", 7, 8], ["second_floor", 2, 3], ["global", 0, 2]]
+  green: [["entrance", 0, 0], ["front_hall", 1, 2], ["toddler_vr", 1, 1], ["high_altitude", 2, 3], ["high_expansion", 0, 0], ["second_floor", 0, 1], ["global", 0, 1]],
+  yellow: [["entrance", 1, 1], ["front_hall", 2, 4], ["toddler_vr", 2, 4], ["high_altitude", 6, 9], ["high_expansion", 4, 7], ["second_floor", 1, 2], ["global", 0, 2]],
+  red: [["entrance", 1, 2], ["front_hall", 2, 5], ["toddler_vr", 3, 4], ["high_altitude", 7, 10], ["high_expansion", 5, 8], ["second_floor", 2, 3], ["global", 0, 2]]
 };
 const iso = () => new Date().toISOString();
 function fail(message, code = "P0001") { const error = new Error(message); error.code = code; throw error; }
